@@ -1,6 +1,7 @@
 package com.gongsi;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -12,9 +13,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** 컨텍스트가 뜨고 Flyway V1 마이그레이션이 성공하는지 검증 */
+/** 컨텍스트가 뜨고 Flyway V1 마이그레이션이 성공하는지 검증. Docker 가 있는 CI 에서만 실행 */
 @SpringBootTest
 @Testcontainers
+@EnabledIfEnvironmentVariable(named = "CI", matches = "true")
 class MigrationSmokeTest {
 
     @Container
