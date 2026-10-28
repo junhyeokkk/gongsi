@@ -1,0 +1,24 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# survey
+survey/errors.log
+
+# java / gradle (착수 시 사용)
+build/
+.gradle/
+*.class
+
+# ide
+.idea/
+*.iml
+.vscode/
+
+# os
+.DS_Store
+Thumbs.db
