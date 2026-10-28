@@ -1,4 +1,4 @@
-# secrets
+﻿# secrets
 .env
 
 # python
@@ -9,10 +9,12 @@ __pycache__/
 # survey
 survey/errors.log
 
-# java / gradle (착수 시 사용)
+# java / gradle
 build/
 .gradle/
 *.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
 
 # ide
 .idea/
