@@ -4,4 +4,4 @@
 
 | 파일 | 내용 |
 | --- | --- |
-| [aws-deploy.md](aws-deploy.md) | AWS EC2 + RDS 구성, 첫 배포, 2026-10-30 데이터 이전, 매일 실행 확인 |
+| [aws-deploy.md](aws-deploy.md) | AWS(시드니) EC2 + RDS 구성, pull 배포, 데이터 이전, 매일 실행 확인 |
