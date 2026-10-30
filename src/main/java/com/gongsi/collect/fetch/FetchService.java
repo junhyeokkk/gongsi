@@ -13,13 +13,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** FetchStep 이 호출하는 오케스트레이터. 상품군×금융권×페이지 반복해서 raw_snapshot 적재 */
+// FetchStep 이 호출하는 서비스 - 상품군×금융권×페이지 반복해서 raw_snapshot 적재
 @Service
 public class FetchService {
 
     private static final Logger log = LoggerFactory.getLogger(FetchService.class);
 
-    /** 은행, 저축은행. 여신전문·보험·금융투자는 포함 여부 미정 */
+    // 은행, 저축은행, 여신전문/보험/금융투자는 포함 여부 미정
     static final List<String> FIN_GRP_NOS = List.of("020000", "030300");
 
     private static final String OK_CODE = "000";
@@ -34,7 +34,7 @@ public class FetchService {
         this.objectMapper = objectMapper;
     }
 
-    /** 5개 상품군 전부 수집. 실패한 금융권은 건너뛰고 요약에 남김 */
+    // 상품군 5개를 돌리고 전체 요약 로그를 찍은 뒤 FetchSummary 반환
     public FetchSummary fetchAll(LocalDate targetDate) {
         List<FetchSummary.TypeResult> results = Arrays.stream(ProductType.values())
                 .map(type -> fetchOne(targetDate, type))
@@ -47,7 +47,7 @@ public class FetchService {
         return summary;
     }
 
-    /** 상품군 하나를 금융권별로 끝 페이지까지 수집 (디버깅·재실행용) */
+    // 한 상품군의 권역 2개를 수집 - 실패한 권역은 failedGroups 에 담고 계속 진행
     public FetchSummary.TypeResult fetchOne(LocalDate targetDate, ProductType type) {
         int pages = 0;
         int totalCount = 0;
@@ -66,7 +66,7 @@ public class FetchService {
         return new FetchSummary.TypeResult(type, pages, totalCount, failedGroups);
     }
 
-    // 한 금융권을 max_page_no 까지 순회. 페이지마다 바로 적재해서 중간에 실패해도 앞 페이지는 남음
+    // 한 금융권을 max_page_no 까지 순회 - 페이지마다 바로 적재해서 중간에 실패해도 앞 페이지는 남음
     private GroupResult fetchGroup(LocalDate targetDate, ProductType type, String finGrpNo) {
         int pageNo = 1;
         int maxPage = 1;
@@ -99,7 +99,7 @@ public class FetchService {
         return result;
     }
 
-    /** 금융권 하나의 적재 페이지 수와 total_count */
+    // 금융권 하나의 적재 페이지 수와 total_count
     private record GroupResult(int pages, int totalCount) {
     }
 }

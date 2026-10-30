@@ -13,11 +13,11 @@ import org.springframework.context.annotation.Configuration;
 
 import java.time.LocalDate;
 
-/** Step 1 — finlife API 호출 후 raw_snapshot 저장 */
+// Step 1 - finlife API 호출 후 raw_snapshot 저장
 @Configuration
 public class FetchStepConfig {
 
-    // 페이지마다 바로 커밋되도록 tasklet 을 DB 트랜잭션으로 묶지 않는다. 재실행은 UPSERT 로 멱등
+    // 페이지마다 바로 커밋되도록 tasklet 을 DB 트랜잭션으로 묶지 않는다 - 재실행은 UPSERT 로 멱등
     @Bean
     public Step fetchStep(JobRepository jobRepository, FetchService fetchService) {
         return new StepBuilder("fetchStep", jobRepository)
