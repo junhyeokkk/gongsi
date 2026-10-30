@@ -16,6 +16,11 @@ spring:
     jdbc:
       initialize-schema: always
 
+fss:
+  base-url: https://finlife.fss.or.kr/finlifeapi
+  auth-key: ${FINLIFE_API_KEY:}
+  timeout-ms: 15000
+
 springdoc:
   api-docs:
     path: /v3/api-docs
