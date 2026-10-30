@@ -1,0 +1,16 @@
+# gongsi 수집 서버 - 상시 실행, 매일 KST 스케줄로 dailyCollectJob 실행
+[Unit]
+Description=gongsi collect server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=gongsi
+Environment=AWS_REGION=ap-northeast-2
+ExecStart=/opt/gongsi/run.sh --collect.schedule.enabled=true
+Restart=on-failure
+RestartSec=30
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
