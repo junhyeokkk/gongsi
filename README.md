@@ -43,6 +43,6 @@ docker compose up -d
 | 서비스 | 포트 |
 |---|---|
 | Spring Boot | 8080 |
-| PostgreSQL | 5432 |
+| PostgreSQL | 5434 |
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 

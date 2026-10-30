@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:gongsi}
+    url: jdbc:postgresql://${DB_HOST:127.0.0.1}:${DB_PORT:5434}/${DB_NAME:gongsi}
     username: ${DB_USER:gongsi}
     password: ${DB_PASS:gongsi}
     driver-class-name: org.postgresql.Driver
@@ -15,6 +15,16 @@ spring:
       enabled: false
     jdbc:
       initialize-schema: always
+
+fss:
+  base-url: https://finlife.fss.or.kr/finlifeapi
+  auth-key: ${FINLIFE_API_KEY:}
+  # 평소 호출 1회 약 0.3초(2026-10-30 실측, 15회 4.4초) → 15초는 약 50배 여유
+  # 하루 1회 배치라 기다리는 사람이 없고, 짧게 잡아 실패하면 그날 원문은 다시 받을 수 없다(날짜 파라미터 없음)
+  timeout-ms: 15000
+  # 네트워크 오류, 타임아웃·5xx 만 재시도 - 대기 1초 -> 2초, 페이지당 최악 약 48초
+  max-attempts: 3
+  retry-backoff-ms: 1000
 
 springdoc:
   api-docs:
