@@ -1,0 +1,10 @@
+# 10분마다 새 릴리스 확인
+[Unit]
+Description=gongsi release check every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target
