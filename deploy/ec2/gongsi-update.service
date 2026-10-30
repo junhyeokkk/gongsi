@@ -1,0 +1,9 @@
+# 새 GitHub Release 가 있으면 설치 - gongsi-update.timer 가 실행
+[Unit]
+Description=gongsi release check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gongsi/deploy.sh

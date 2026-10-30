@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 User=gongsi
-Environment=AWS_REGION=ap-northeast-2
+Environment=AWS_REGION=ap-southeast-2
 ExecStart=/opt/gongsi/run.sh --collect.schedule.enabled=true
 Restart=on-failure
 RestartSec=30
