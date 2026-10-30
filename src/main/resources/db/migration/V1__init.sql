@@ -7,12 +7,12 @@
 
 CREATE TABLE raw_snapshot (
     id           BIGINT       GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    fetched_on   DATE         NOT NULL,
+    fetched_on   DATE         NOT NULL,  -- 어느 날짜 수집인지
     product_type VARCHAR(8)   NOT NULL,  -- DEP / SAV / MORT / RENT / CRED
-    fin_grp_no   VARCHAR(6)   NOT NULL,
+    fin_grp_no   VARCHAR(6)   NOT NULL,  -- 020000 은행 / 030300 저축은행
     page_no      SMALLINT     NOT NULL,
-    payload      JSONB        NOT NULL,
-    fetched_at   TIMESTAMPTZ  NOT NULL,
+    payload      JSONB        NOT NULL,  -- 응답 원문
+    fetched_at   TIMESTAMPTZ  NOT NULL,  -- 실제로 받은 시각
     CONSTRAINT uk_raw_snapshot UNIQUE (fetched_on, product_type, fin_grp_no, page_no)
 );
 
