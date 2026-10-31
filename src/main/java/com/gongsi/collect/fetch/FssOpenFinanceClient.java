@@ -16,6 +16,8 @@ public class FssOpenFinanceClient {
 
     private static final Logger log = LoggerFactory.getLogger(FssOpenFinanceClient.class);
 
+    static final String COMPANY_SERVICE = "companySearch";
+
     private final RestClient fssRestClient;
     private final FssApiProperties props;
 
@@ -26,42 +28,52 @@ public class FssOpenFinanceClient {
 
     // 상품군/금융권/페이지 한 장을 호출해 응답 JSON 으로 반환
     public String fetchPage(ProductType type, String finGrpNo, int pageNo) {
+        return fetch(serviceName(type), type.name(), finGrpNo, pageNo);
+    }
+
+    // 금융회사(companySearch) 한 장
+    public String fetchCompanyPage(String finGrpNo, int pageNo) {
+        return fetch(COMPANY_SERVICE, RawSnapshotRepository.COMPANY, finGrpNo, pageNo);
+    }
+
+    // label 은 로그·예외에 남길 상품군 코드 또는 COMPANY
+    private String fetch(String service, String label, String finGrpNo, int pageNo) {
         if (props.authKey() == null || props.authKey().isBlank()) {
             throw new FssApiException("FSS 인증키 없음 — 환경변수 FINLIFE_API_KEY 를 설정할 것");
         }
         for (int attempt = 1; ; attempt++) { // 일시 오류는 maxAttempts 까지 재시도
             try {
-                return call(type, finGrpNo, pageNo);
+                return call(service, finGrpNo, pageNo);
             } catch (ResourceAccessException | HttpServerErrorException e) {
                 // 네트워크 오류·타임아웃·5xx 는 일시적일 수 있어 재시도
                 if (attempt >= props.maxAttempts()) {
-                    throw failure(type, finGrpNo, pageNo, attempt, e);
+                    throw failure(label, finGrpNo, pageNo, attempt, e);
                 }
                 log.warn("FSS 재시도 {}/{} type={} finGrpNo={} page={}: {}", attempt, props.maxAttempts(),
-                        type, finGrpNo, pageNo, mask(e.getMessage()));
+                        label, finGrpNo, pageNo, mask(e.getMessage()));
                 sleep(props.retryBackoffMs() << (attempt - 1));
             } catch (RestClientException e) {
                 // 4xx 등은 다시 보내도 같은 결과라 바로 실패
-                throw failure(type, finGrpNo, pageNo, attempt, e);
+                throw failure(label, finGrpNo, pageNo, attempt, e);
             }
         }
     }
 
-    private String call(ProductType type, String finGrpNo, int pageNo) {
+    private String call(String service, String finGrpNo, int pageNo) {
         return fssRestClient.get()
                 .uri(uri -> uri.path("/{service}.json")
                         .queryParam("auth", props.authKey())
                         .queryParam("topFinGrpNo", finGrpNo)
                         .queryParam("pageNo", pageNo)
-                        .build(serviceName(type)))
+                        .build(service))
                 .retrieve()
                 .body(String.class);
     }
 
     // 원인 메시지에 요청 URL(인증키 포함)이 들어가므로 마스킹하고 cause 는 잇지 않는다
-    private FssApiException failure(ProductType type, String finGrpNo, int pageNo, int attempts, RestClientException e) {
+    private FssApiException failure(String label, String finGrpNo, int pageNo, int attempts, RestClientException e) {
         return new FssApiException("FSS 호출 실패 type=%s finGrpNo=%s page=%d (%d회 시도): %s".formatted(
-                type, finGrpNo, pageNo, attempts, mask(e.getClass().getSimpleName() + " " + e.getMessage())));
+                label, finGrpNo, pageNo, attempts, mask(e.getClass().getSimpleName() + " " + e.getMessage())));
     }
 
     private static void sleep(long millis) {

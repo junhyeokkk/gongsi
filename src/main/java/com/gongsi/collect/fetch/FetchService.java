@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-// FetchStep 이 호출하는 서비스 - 상품군×금융권×페이지 반복해서 raw_snapshot 적재
+// FetchStep 이 호출하는 서비스 - (상품군·금융회사)×금융권×페이지 반복해서 raw_snapshot 적재
 @Service
 public class FetchService {
 
@@ -34,47 +34,58 @@ public class FetchService {
         this.objectMapper = objectMapper;
     }
 
-    // 상품군 5개를 돌리고 전체 요약 로그를 찍은 뒤 FetchSummary 반환
+    // 상품군 5개와 금융회사를 돌리고 전체 요약 로그를 찍은 뒤 FetchSummary 반환
     public FetchSummary fetchAll(LocalDate targetDate) {
-        List<FetchSummary.TypeResult> results = Arrays.stream(ProductType.values())
+        List<FetchSummary.DatasetResult> results = new ArrayList<>(Arrays.stream(ProductType.values())
                 .map(type -> fetchOne(targetDate, type))
-                .toList();
+                .toList());
+        results.add(fetchCompanies(targetDate));
         var summary = new FetchSummary(targetDate, results);
         log.info("fetch 완료 targetDate={} pages={} totalCount={} hasFailures={}", targetDate,
-                results.stream().mapToInt(FetchSummary.TypeResult::pages).sum(),
-                results.stream().mapToInt(FetchSummary.TypeResult::totalCount).sum(),
+                results.stream().mapToInt(FetchSummary.DatasetResult::pages).sum(),
+                results.stream().mapToInt(FetchSummary.DatasetResult::totalCount).sum(),
                 summary.hasFailures());
         return summary;
     }
 
-    // 한 상품군의 권역 2개를 수집 - 실패한 권역은 failedGroups 에 담고 계속 진행
-    public FetchSummary.TypeResult fetchOne(LocalDate targetDate, ProductType type) {
+    // 한 상품군의 권역 2개를 수집
+    public FetchSummary.DatasetResult fetchOne(LocalDate targetDate, ProductType type) {
+        return fetchDataset(targetDate, type.name(), (finGrpNo, pageNo) -> client.fetchPage(type, finGrpNo, pageNo));
+    }
+
+    // 금융회사 목록을 상품과 같은 권역으로 수집 - 원문은 product_type=COMPANY 로 raw_snapshot 에 둔다
+    public FetchSummary.DatasetResult fetchCompanies(LocalDate targetDate) {
+        return fetchDataset(targetDate, RawSnapshotRepository.COMPANY, client::fetchCompanyPage);
+    }
+
+    // 실패한 권역은 failedGroups 에 담고 계속 진행
+    private FetchSummary.DatasetResult fetchDataset(LocalDate targetDate, String dataset, PageFetcher fetcher) {
         int pages = 0;
         int totalCount = 0;
         List<String> failedGroups = new ArrayList<>();
         for (String finGrpNo : FIN_GRP_NOS) {
             try {
-                GroupResult group = fetchGroup(targetDate, type, finGrpNo);
+                GroupResult group = fetchGroup(targetDate, dataset, finGrpNo, fetcher);
                 pages += group.pages();
                 totalCount += group.totalCount();
             } catch (FssApiException e) {
-                log.error("fetch 실패 {} {}: {}", type, finGrpNo, e.getMessage());
+                log.error("fetch 실패 {} {}: {}", dataset, finGrpNo, e.getMessage());
                 failedGroups.add(finGrpNo);
             }
         }
-        log.info("fetch {} pages={} totalCount={} failedGroups={}", type, pages, totalCount, failedGroups);
-        return new FetchSummary.TypeResult(type, pages, totalCount, failedGroups);
+        log.info("fetch {} pages={} totalCount={} failedGroups={}", dataset, pages, totalCount, failedGroups);
+        return new FetchSummary.DatasetResult(dataset, pages, totalCount, failedGroups);
     }
 
     // 한 금융권을 max_page_no 까지 순회 - 페이지마다 바로 적재해서 중간에 실패해도 앞 페이지는 남음
-    private GroupResult fetchGroup(LocalDate targetDate, ProductType type, String finGrpNo) {
+    private GroupResult fetchGroup(LocalDate targetDate, String dataset, String finGrpNo, PageFetcher fetcher) {
         int pageNo = 1;
         int maxPage = 1;
         int totalCount = 0;
         while (pageNo <= maxPage) {
-            String body = client.fetchPage(type, finGrpNo, pageNo);
-            JsonNode result = parseResult(body, type, finGrpNo, pageNo);
-            rawRepo.insertOrUpdate(targetDate, type, finGrpNo, pageNo, body);
+            String body = fetcher.fetch(finGrpNo, pageNo);
+            JsonNode result = parseResult(body, dataset, finGrpNo, pageNo);
+            rawRepo.insertOrUpdate(targetDate, dataset, finGrpNo, pageNo, body);
             maxPage = result.path("max_page_no").asInt(1);
             totalCount = result.path("total_count").asInt(0);
             pageNo++;
@@ -83,20 +94,26 @@ public class FetchService {
     }
 
     // err_cd 가 000 이 아니면 HTTP 200 이어도 실패로 본다
-    private JsonNode parseResult(String body, ProductType type, String finGrpNo, int pageNo) {
+    private JsonNode parseResult(String body, String dataset, String finGrpNo, int pageNo) {
         JsonNode result;
         try {
             result = objectMapper.readTree(body).path("result");
         } catch (JsonProcessingException e) {
             throw new FssApiException("FSS 응답 JSON 파싱 실패 type=%s finGrpNo=%s page=%d".formatted(
-                    type, finGrpNo, pageNo));
+                    dataset, finGrpNo, pageNo));
         }
         String errCd = result.path("err_cd").asText();
         if (!OK_CODE.equals(errCd)) {
             throw new FssApiException("FSS 응답 오류 type=%s finGrpNo=%s page=%d err_cd=%s err_msg=%s".formatted(
-                    type, finGrpNo, pageNo, errCd, result.path("err_msg").asText()));
+                    dataset, finGrpNo, pageNo, errCd, result.path("err_msg").asText()));
         }
         return result;
+    }
+
+    // 권역·페이지 하나를 받아오는 호출
+    @FunctionalInterface
+    private interface PageFetcher {
+        String fetch(String finGrpNo, int pageNo);
     }
 
     // 금융권 하나의 적재 페이지 수와 total_count
