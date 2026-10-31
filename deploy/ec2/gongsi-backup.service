@@ -1,0 +1,12 @@
+# raw_snapshot 오늘치를 S3 에 백업 - gongsi-backup.timer 가 실행
+[Unit]
+Description=gongsi raw_snapshot backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=gongsi
+Environment=AWS_REGION=ap-southeast-2
+Environment=BACKUP_BUCKET=gongsi-deploy-437075213716
+ExecStart=/opt/gongsi/backup.sh
