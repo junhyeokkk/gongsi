@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.util.List;
 
 // raw_snapshot 테이블 쓰기 전담 멱등 UPSERT (uk_raw_snapshot 충돌 시 payload 업데이트)
 @Repository
@@ -26,10 +27,23 @@ public class RawSnapshotRepository {
         this.jdbc = jdbc;
     }
 
-    // TODO 3주차: findByDate(fetchedOn, type) — Normalize Step 이 당일 raw 전부 로드
-
     // 한 페이지 원문을 적재하고 행 id 반환 - 같은 날,같은 페이지면 덮어씀
     public long insertOrUpdate(LocalDate fetchedOn, ProductType type, String finGrpNo, int pageNo, String payload) {
         return jdbc.queryForObject(UPSERT_SQL, Long.class, fetchedOn, type.name(), finGrpNo, pageNo, payload);
+    }
+
+    // 그날 한 상품군의 원문 전 페이지를 권역·페이지 순으로 로드
+    public List<RawPage> findByDate(LocalDate fetchedOn, ProductType type) {
+        return jdbc.query("""
+                        SELECT id, fin_grp_no, payload::text AS payload FROM raw_snapshot
+                        WHERE fetched_on = ? AND product_type = ?
+                        ORDER BY fin_grp_no, page_no
+                        """,
+                (rs, i) -> new RawPage(rs.getLong("id"), rs.getString("fin_grp_no"), rs.getString("payload")),
+                fetchedOn, type.name());
+    }
+
+    // raw_snapshot 한 행 - normalize_error 가 id 로 원문을 가리킨다
+    public record RawPage(long id, String finGrpNo, String payload) {
     }
 }
