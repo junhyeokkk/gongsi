@@ -9,3 +9,6 @@
 | --- | --- |
 | `data-model.md` | 테이블 구성, 상품군 분리, 상품군별 정규화 규칙과 근거 |
 | `product-types/` | 상품군별 원문 예시와 필드 → 컬럼 매핑 (상품군 하나 = 문서 하나) |
+| `fin-groups.md` | 권역(은행·저축은행) — 원문에서의 위치, 권역별 실측, 페이지 구성, 저장 방식 |
+| `company.md` | 금융회사(companySearch) — 원문, company·company_area 테이블, 정규화, 실측 |
+| `fss-api.md` | 금감원 Open API — 서비스 목록, 요청 파라미터, 응답 공통 필드, 권역 × 서비스 |

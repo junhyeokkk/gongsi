@@ -2,7 +2,7 @@
 
 금감원 금융상품 원문을 어떻게 테이블로 나눴고 상품군별로 어떻게 정규화하는지, 그리고 왜 그렇게 했는지.
 스키마 정본은 `src/main/resources/db/migration/V1__init.sql`, 정규화 코드는 `collect/normalize/` 다.
-상품군별 원문 예시와 필드 매핑은 [product-types/](product-types/README.md).
+상품군별 원문 예시와 필드 매핑은 [product-types/](product-types/README.md), 권역별 데이터는 [fin-groups.md](fin-groups.md).
 
 ## 1. 원문에서 확인한 것
 
@@ -24,12 +24,13 @@
 ## 2. 테이블을 나눈 방식
 
 ```
-raw_snapshot          날짜·상품군·권역·페이지 단위 원문 (수집 전용)
+raw_snapshot          날짜·상품군(또는 COMPANY)·권역·페이지 단위 원문 (수집 전용)
 normalize_error       정규화하지 못한 레코드와 사유 (수집 전용)
 
 product ─< product_option ─< rate_history                          예금·적금·주담대·전세
 credit_loan_product ─< credit_loan_option ─< credit_rate_history   신용대출
 change_event          두 계열의 변동 이벤트 (product_id XOR credit_loan_product_id)
+company ─< company_area                                           금융회사와 시·도별 영업점 유무 (company.md)
 ```
 
 ### 원문과 정규화 결과를 분리한 이유

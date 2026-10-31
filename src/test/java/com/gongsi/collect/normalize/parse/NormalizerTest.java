@@ -148,13 +148,19 @@ class NormalizerTest {
     @Test
     void 실제_원문_전체가_오류_없이_정규화됨() throws IOException {
         try (Stream<Path> files = Files.list(RAW_DIR)) {
-            for (Path file : files.filter(f -> !f.getFileName().toString().startsWith("credit")).toList()) {
+            for (Path file : files.filter(NormalizerTest::isProductFile).toList()) {
                 Normalizer normalizer = Normalizer.of(typeOf(file));
                 JsonNode result = MAPPER.readTree(file.toFile()).path("result");
                 result.path("baseList").forEach(normalizer::normalizeBase);
                 result.path("optionList").forEach(normalizer::normalizeOption);
             }
         }
+    }
+
+    // 신용대출은 미지원, companySearch 는 CompanyNormalizerTest 가 본다
+    private static boolean isProductFile(Path file) {
+        String name = file.getFileName().toString();
+        return !name.startsWith("credit") && !name.startsWith("company");
     }
 
     private static void assertReason(Runnable call, NormalizeErrorReason reason) {

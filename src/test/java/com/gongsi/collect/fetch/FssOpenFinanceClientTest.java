@@ -52,6 +52,18 @@ class FssOpenFinanceClientTest {
     }
 
     @Test
+    void 금융회사는_companySearch_경로로_호출() {
+        server.expect(requestTo(BASE_URL + "/companySearch.json?auth=secret-key&topFinGrpNo=020000&pageNo=1"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"result\":{}}", MediaType.APPLICATION_JSON));
+
+        String body = client.fetchCompanyPage("020000", 1);
+
+        assertThat(body).isEqualTo("{\"result\":{}}");
+        server.verify();
+    }
+
+    @Test
     void 일시적인_5xx_는_재시도해서_성공하면_본문_반환() {
         server.expect(once(), requestTo(DEP_URL)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
         server.expect(once(), requestTo(DEP_URL)).andRespond(withSuccess("{\"result\":{}}", MediaType.APPLICATION_JSON));

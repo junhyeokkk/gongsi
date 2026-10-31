@@ -54,6 +54,7 @@ class FetchServiceTest {
     void setUp() {
         jdbc.update("DELETE FROM raw_snapshot");
         when(client.fetchPage(any(), anyString(), anyInt())).thenReturn(page(1, 1, 10));
+        when(client.fetchCompanyPage(anyString(), anyInt())).thenReturn(page(1, 1, 5));
     }
 
     @Test
@@ -69,6 +70,8 @@ class FetchServiceTest {
         assertThat(summary.hasFailures()).isFalse();
         assertThat(summary.result(ProductType.DEP).pages()).isEqualTo(4);
         assertThat(summary.result(ProductType.DEP).totalCount()).isEqualTo(260);
+        assertThat(summary.result(RawSnapshotRepository.COMPANY).totalCount()).isEqualTo(10);
+        assertThat(countRows(RawSnapshotRepository.COMPANY, "030300")).isEqualTo(1);
     }
 
     @Test
@@ -78,12 +81,23 @@ class FetchServiceTest {
 
         fetchService.fetchAll(DAY);
 
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_snapshot", Integer.class)).isEqualTo(10);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_snapshot", Integer.class)).isEqualTo(12);
         Integer total = jdbc.queryForObject("""
                 SELECT (payload -> 'result' ->> 'total_count')::int FROM raw_snapshot
                 WHERE fetched_on = ? AND product_type = 'SAV' AND fin_grp_no = '020000' AND page_no = 1
                 """, Integer.class, DAY);
         assertThat(total).isEqualTo(99);
+    }
+
+    @Test
+    void 금융회사_수집이_실패하면_요약에_실패로_남김() {
+        when(client.fetchCompanyPage("030300", 1)).thenThrow(new FssApiException("timeout"));
+
+        FetchSummary summary = fetchService.fetchAll(DAY);
+
+        assertThat(summary.hasFailures()).isTrue();
+        assertThat(summary.result(RawSnapshotRepository.COMPANY).failedGroups()).containsExactly("030300");
+        assertThat(countRows(RawSnapshotRepository.COMPANY, "020000")).isEqualTo(1);
     }
 
     @Test
@@ -105,9 +119,13 @@ class FetchServiceTest {
     }
 
     private int countRows(ProductType type, String finGrpNo) {
+        return countRows(type.name(), finGrpNo);
+    }
+
+    private int countRows(String dataset, String finGrpNo) {
         return jdbc.queryForObject(
                 "SELECT COUNT(*) FROM raw_snapshot WHERE fetched_on = ? AND product_type = ? AND fin_grp_no = ?",
-                Integer.class, DAY, type.name(), finGrpNo);
+                Integer.class, DAY, dataset, finGrpNo);
     }
 
     private static String page(int nowPage, int maxPage, int totalCount) {

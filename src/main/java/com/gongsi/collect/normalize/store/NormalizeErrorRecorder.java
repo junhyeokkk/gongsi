@@ -22,18 +22,27 @@ public class NormalizeErrorRecorder {
 
     // 같은 날 재실행 시 이전 기록을 지워 에러가 중복되지 않게 함
     public void clear(LocalDate fetchedOn, ProductType type) {
-        jdbc.update("DELETE FROM normalize_error WHERE fetched_on = ? AND product_type = ?",
-                fetchedOn, type.name());
+        clear(fetchedOn, type.name());
+    }
+
+    // dataset: product_type 컬럼 값 - 상품군 코드 또는 COMPANY
+    public void clear(LocalDate fetchedOn, String dataset) {
+        jdbc.update("DELETE FROM normalize_error WHERE fetched_on = ? AND product_type = ?", fetchedOn, dataset);
     }
 
     // listKind: BASE / OPTION, recordIndex: 페이지 안 배열 위치
     public void record(LocalDate fetchedOn, ProductType type, long rawSnapshotId,
+                       String listKind, int recordIndex, NormalizeErrorReason reason, String detail) {
+        record(fetchedOn, type.name(), rawSnapshotId, listKind, recordIndex, reason, detail);
+    }
+
+    public void record(LocalDate fetchedOn, String dataset, long rawSnapshotId,
                        String listKind, int recordIndex, NormalizeErrorReason reason, String detail) {
         String trimmed = detail != null && detail.length() > DETAIL_MAX ? detail.substring(0, DETAIL_MAX) : detail;
         jdbc.update("""
                 INSERT INTO normalize_error
                     (fetched_on, product_type, raw_snapshot_id, list_kind, record_index, reason, detail)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, fetchedOn, type.name(), rawSnapshotId, listKind, recordIndex, reason.name(), trimmed);
+                """, fetchedOn, dataset, rawSnapshotId, listKind, recordIndex, reason.name(), trimmed);
     }
 }

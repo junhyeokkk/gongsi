@@ -13,13 +13,13 @@ API `creditLoanProductsSearch` · 테이블 **credit_loan_product + credit_loan_
 }
 ```
 
-| 원문 | credit_loan_product 컬럼 | 비고 |
-| --- | --- | --- |
-| `fin_co_no` / `fin_prdt_cd` / `crdt_prdt_type` | `inst_code` / `product_code` / `credit_product_type` | **셋이 자연키.** 1 일반 / 2 마이너스한도 / 3 카드론 |
-| `kor_co_nm` / `fin_prdt_nm` / `join_way` | `inst_name` / `product_name` / `join_way` | |
-| `cb_name` | `cb_name` | 신용평가사 KCB / NICE. 다른 상품군에 없음 |
-| 공시월·공시기간·제출일 | product 와 같은 규칙 | `"99991231"` → null |
-| — | — | `join_deny`·`join_member`·`etc_note`·대출 문장 필드가 원문에 없다 |
+| 원문 | 비고 |
+| --- | --- |
+| `fin_co_no` / `fin_prdt_cd` / `crdt_prdt_type` | **셋이 자연키.** 1 일반 / 2 마이너스한도 / 3 카드론 |
+| `kor_co_nm` / `fin_prdt_nm` / `join_way` | |
+| `cb_name` | 신용평가사 KCB / NICE. 다른 상품군에 없음 |
+| 공시월·공시기간·제출일 | `"99991231"` → null |
+| — | `join_deny`·`join_member`·`etc_note`·대출 문장 필드가 원문에 없다 |
 
 ## option → credit_loan_option
 
