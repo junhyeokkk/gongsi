@@ -55,12 +55,14 @@ NAT **없음**, VPC 엔드포인트 **S3 게이트웨이**(무료), DNS 두 개 
     { "Effect": "Allow", "Action": "s3:ListBucket",
       "Resource": "arn:aws:s3:::gongsi-deploy-437075213716" },
     { "Effect": "Allow", "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::gongsi-deploy-437075213716/*" }
+      "Resource": "arn:aws:s3:::gongsi-deploy-437075213716/*" },
+    { "Effect": "Allow", "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::gongsi-deploy-437075213716/raw_snapshot/*" }
   ]
 }
 ```
 
-S3 권한은 8단계 데이터 이전에만 쓴다.
+S3 읽기는 8단계 데이터 이전, `raw_snapshot/*` 쓰기는 10단계 일별 백업에 쓴다.
 
 ## 4. EC2
 
@@ -177,6 +179,30 @@ sudo -u gongsi AWS_REGION=ap-southeast-2 /opt/gongsi/run.sh \
   --spring.main.web-application-type=none --spring.batch.job.enabled=true \
   --spring.batch.job.name=dailyCollectJob targetDate=YYYY-MM-DD
 sudo systemctl start gongsi
+```
+
+## 10. 일별 백업 (raw_snapshot → S3)
+
+RDS 자동 백업은 무료 플랜에서 1일만 남으므로, 매일 16:00 KST `gongsi-backup.timer` 가 그날치를
+`s3://gongsi-deploy-437075213716/raw_snapshot/<날짜>.csv.gz` 와 `<날짜>.fingerprint` 로 남긴다.
+그날 수집이 0행이면 백업하지 않고 실패로 journal 에 남긴다.
+
+처음 도입할 때 한 번 — 3단계 정책에 `s3:PutObject` 문을 추가한 뒤, 새 Release 가 나오면:
+
+```bash
+curl -fsSL https://github.com/junhyeokkk/gongsi/releases/latest/download/deploy.sh | sudo FORCE=1 bash
+sudo -u gongsi AWS_REGION=ap-southeast-2 BACKUP_BUCKET=gongsi-deploy-437075213716 /opt/gongsi/backup.sh 2026-10-30
+sudo -u gongsi AWS_REGION=ap-southeast-2 BACKUP_BUCKET=gongsi-deploy-437075213716 /opt/gongsi/backup.sh 2026-10-31
+systemctl list-timers gongsi-backup.timer --no-pager
+```
+
+확인: `sudo journalctl -u gongsi-backup --since today --no-pager | tail -3` → `백업 완료: <날짜> rows=15 fingerprint=15|...`
+
+복구(빈 날짜에만): S3 에서 받은 파일로
+
+```bash
+gzip -dc 2026-10-30.csv.gz | psql -v ON_ERROR_STOP=1 -f deploy/migrate/import.sql
+psql -At -v d=2026-10-30 -f /opt/gongsi/fingerprint.sql   # .fingerprint 파일과 같아야 함
 ```
 
 ## 롤백 · 정리

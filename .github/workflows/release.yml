@@ -32,8 +32,8 @@ jobs:
         run: |
           mkdir release
           cp "$(ls build/libs/*.jar | grep -v -- '-plain.jar')" release/app.jar
-          cp deploy/ec2/run.sh deploy/ec2/deploy.sh deploy/ec2/gongsi.service \
-             deploy/ec2/gongsi-update.service deploy/ec2/gongsi-update.timer release/
+          cp deploy/ec2/*.sh deploy/ec2/*.service deploy/ec2/*.timer deploy/migrate/fingerprint.sql release/
+          rm release/user-data.sh
           echo "$GITHUB_SHA" > release/VERSION
 
       - name: GitHub Release 게시

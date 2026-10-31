@@ -10,25 +10,36 @@ trap 'rm -rf "$STAGE"' EXIT
 
 fetch() { curl -fsSL --retry 3 -o "$STAGE/$1" "$BASE/$1"; }
 
+# 새 deploy.sh 로 한 번 다시 실행해 설치 목록 변경이 같은 배포에서 반영되게 한다
+fetch deploy.sh
+if [ -z "${GONGSI_REEXEC:-}" ] && ! cmp -s "$STAGE/deploy.sh" "$0"; then
+  install -m 0755 "$STAGE/deploy.sh" /tmp/gongsi-deploy.sh
+  rm -rf "$STAGE"
+  GONGSI_REEXEC=1 exec bash /tmp/gongsi-deploy.sh
+fi
+
 fetch VERSION
 NEW="$(cat "$STAGE/VERSION")"
-# 같은 버전이거나 이미 실패한 버전이면 아무것도 하지 않는다
-[ "$NEW" = "$(cat "$APP_DIR/VERSION" 2>/dev/null)" ] && exit 0
-[ "$NEW" = "$(cat "$APP_DIR/FAILED_VERSION" 2>/dev/null)" ] && exit 0
+# 같은 버전이거나 이미 실패한 버전이면 아무것도 하지 않는다 (FORCE=1 이면 다시 설치)
+if [ -z "${FORCE:-}" ]; then
+  [ "$NEW" = "$(cat "$APP_DIR/VERSION" 2>/dev/null)" ] && exit 0
+  [ "$NEW" = "$(cat "$APP_DIR/FAILED_VERSION" 2>/dev/null)" ] && exit 0
+fi
 
-for f in app.jar run.sh deploy.sh gongsi.service gongsi-update.service gongsi-update.timer; do fetch "$f"; done
+UNITS="gongsi.service gongsi-update.service gongsi-update.timer gongsi-backup.service gongsi-backup.timer"
+for f in app.jar run.sh ssm-env.sh backup.sh fingerprint.sql $UNITS; do fetch "$f"; done
 
 id gongsi >/dev/null 2>&1 || useradd --system --home-dir "$APP_DIR" --shell /sbin/nologin gongsi
 install -d -o gongsi -g gongsi "$APP_DIR"
-install -m 0755 "$STAGE/run.sh" "$APP_DIR/run.sh"
-install -m 0755 "$STAGE/deploy.sh" "$APP_DIR/deploy.sh"
-install -m 0644 "$STAGE"/gongsi.service "$STAGE"/gongsi-update.service "$STAGE"/gongsi-update.timer /etc/systemd/system/
+install -m 0755 "$STAGE/run.sh" "$STAGE/backup.sh" "$STAGE/deploy.sh" "$APP_DIR/"
+install -m 0644 "$STAGE/ssm-env.sh" "$STAGE/fingerprint.sql" "$APP_DIR/"
+for u in $UNITS; do install -m 0644 "$STAGE/$u" /etc/systemd/system/; done
 
 [ -f "$APP_DIR/app.jar" ] && cp "$APP_DIR/app.jar" "$APP_DIR/app.jar.prev"
 install -m 0644 -o gongsi -g gongsi "$STAGE/app.jar" "$APP_DIR/app.jar"
 
 systemctl daemon-reload
-systemctl enable --now gongsi-update.timer >/dev/null
+systemctl enable --now gongsi-update.timer gongsi-backup.timer >/dev/null
 systemctl enable gongsi >/dev/null
 systemctl restart gongsi
 
