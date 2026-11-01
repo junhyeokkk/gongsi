@@ -68,9 +68,9 @@ class FetchServiceTest {
         assertThat(countRows(ProductType.DEP, "030300")).isEqualTo(3);
         assertThat(countRows(ProductType.DEP, "020000")).isEqualTo(1);
         assertThat(summary.hasFailures()).isFalse();
-        assertThat(summary.result(ProductType.DEP).pages()).isEqualTo(4);
-        assertThat(summary.result(ProductType.DEP).totalCount()).isEqualTo(260);
-        assertThat(summary.result(RawSnapshotRepository.COMPANY).totalCount()).isEqualTo(10);
+        assertThat(summary.result(ProductType.DEP).pages()).isEqualTo(6);
+        assertThat(summary.result(ProductType.DEP).totalCount()).isEqualTo(280);
+        assertThat(summary.result(RawSnapshotRepository.COMPANY).totalCount()).isEqualTo(20);
         assertThat(countRows(RawSnapshotRepository.COMPANY, "030300")).isEqualTo(1);
     }
 
@@ -81,7 +81,7 @@ class FetchServiceTest {
 
         fetchService.fetchAll(DAY);
 
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_snapshot", Integer.class)).isEqualTo(12);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_snapshot", Integer.class)).isEqualTo(24);
         Integer total = jdbc.queryForObject("""
                 SELECT (payload -> 'result' ->> 'total_count')::int FROM raw_snapshot
                 WHERE fetched_on = ? AND product_type = 'SAV' AND fin_grp_no = '020000' AND page_no = 1
@@ -111,7 +111,7 @@ class FetchServiceTest {
         FetchSummary summary = fetchService.fetchAll(DAY);
 
         assertThat(summary.hasFailures()).isTrue();
-        assertThat(summary.result(ProductType.MORT).failedGroups()).containsExactly("020000", "030300");
+        assertThat(summary.result(ProductType.MORT).failedGroups()).containsExactlyElementsOf(FetchService.FIN_GRP_NOS);
         assertThat(summary.result(ProductType.RENT).failedGroups()).containsExactly("030300");
         assertThat(countRows(ProductType.MORT, "020000")).isZero();
         assertThat(countRows(ProductType.RENT, "020000")).isEqualTo(1);
