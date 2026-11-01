@@ -5,7 +5,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 // raw_snapshot 테이블 쓰기 전담 멱등 UPSERT (uk_raw_snapshot 충돌 시 payload 업데이트)
 @Repository
@@ -53,6 +55,20 @@ public class RawSnapshotRepository {
                         """,
                 (rs, i) -> new RawPage(rs.getLong("id"), rs.getString("fin_grp_no"), rs.getString("payload")),
                 fetchedOn, dataset);
+    }
+
+    // 권역마다 before 보다 이른 마지막 수집일 - 그 권역의 직전 원문
+    public Map<String, LocalDate> latestDatesBefore(ProductType type, LocalDate before) {
+        Map<String, LocalDate> dates = new HashMap<>();
+        jdbc.query("""
+                        SELECT fin_grp_no, MAX(fetched_on) AS fetched_on FROM raw_snapshot
+                        WHERE product_type = ? AND fetched_on < ?
+                        GROUP BY fin_grp_no
+                        """,
+                rs -> {
+                    dates.put(rs.getString("fin_grp_no"), rs.getDate("fetched_on").toLocalDate());
+                }, type.name(), before);
+        return dates;
     }
 
     // raw_snapshot 한 행 - normalize_error 가 id 로 원문을 가리킨다
