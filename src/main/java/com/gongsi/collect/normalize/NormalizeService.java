@@ -33,7 +33,7 @@ public class NormalizeService {
     private static final Logger log = LoggerFactory.getLogger(NormalizeService.class);
 
     // CRED 는 credit_loan_* 대상이라 아직 제외
-    static final List<ProductType> TYPES = List.of(ProductType.DEP, ProductType.SAV, ProductType.MORT, ProductType.RENT);
+    public static final List<ProductType> TYPES = List.of(ProductType.DEP, ProductType.SAV, ProductType.MORT, ProductType.RENT);
 
     private final RawSnapshotRepository rawRepo;
     private final ProductUpsertService upsertService;
