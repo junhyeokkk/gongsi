@@ -151,7 +151,7 @@ diff Step(`collect/diff/`)이 normalize 다음에 돈다. 상품군마다 target
 
 - 오늘 격리된 레코드(고아 옵션 포함)가 있는 상품은 CLOSED·OPTION_REMOVED 로 보지 않는다
 - 상품군 상품이 하루에 10%(최소 5개) 넘게 사라지거나 생기면 원문 누락으로 보고 Step 을 실패시킨다
-  (fetch 가 실패 권역을 건너뛰어 페이지 일부만 남은 날)
+  (fetch 가 중간에 실패해 페이지 일부만 raw_snapshot 에 남은 날이 직전일이 되는 경우)
 
 한 옵션에서 기본금리는 내리고 최고금리는 오르면 `RATE_UP`·`RATE_DOWN` 이 함께 생긴다.
 payload 는 `{"changes":[{"field":"max_rate","old":3.10,"new":3.20}]}` 이고 나머지 이벤트는 null 이다.
