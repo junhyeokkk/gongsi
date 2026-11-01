@@ -19,8 +19,8 @@ public class FetchService {
 
     private static final Logger log = LoggerFactory.getLogger(FetchService.class);
 
-    // 은행, 저축은행, 여신전문/보험/금융투자는 포함 여부 미정
-    static final List<String> FIN_GRP_NOS = List.of("020000", "030300");
+    // 은행, 저축은행, 여신전문, 보험 - 금융투자는 상품이 없어 제외 (2026-11-01 확인)
+    static final List<String> FIN_GRP_NOS = List.of("020000", "030300", "030200", "050000");
 
     private static final String OK_CODE = "000";
 
@@ -48,7 +48,7 @@ public class FetchService {
         return summary;
     }
 
-    // 한 상품군의 권역 2개를 수집
+    // 한 상품군을 수집 권역 전부에서 수집
     public FetchSummary.DatasetResult fetchOne(LocalDate targetDate, ProductType type) {
         return fetchDataset(targetDate, type.name(), (finGrpNo, pageNo) -> client.fetchPage(type, finGrpNo, pageNo));
     }
