@@ -42,6 +42,7 @@ class RateDiffServiceTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Path RAW_DIR = Path.of("survey/raw");
     private static final String CHANGED = "WR0001B";
+    private static final String CREDIT = "creditLoanProductsSearch_020000_p1";
 
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16");
@@ -68,7 +69,10 @@ class RateDiffServiceTest {
     void setUp() throws IOException {
         jdbc.update("DELETE FROM change_event");
         jdbc.update("DELETE FROM rate_history");
+        jdbc.update("DELETE FROM credit_rate_history");
         jdbc.update("DELETE FROM normalize_error");
+        jdbc.update("DELETE FROM credit_loan_option");
+        jdbc.update("DELETE FROM credit_loan_product");
         jdbc.update("DELETE FROM product_option");
         jdbc.update("DELETE FROM product");
         jdbc.update("DELETE FROM raw_snapshot");
@@ -168,6 +172,37 @@ class RateDiffServiceTest {
     }
 
     @Test
+    void 신용대출_금리_변동은_credit_계열로_적재() throws IOException {
+        jdbc.update("DELETE FROM raw_snapshot WHERE fetched_on = ? AND product_type = 'CRED'", DAY2);
+        insertRaw(DAY2, ProductType.CRED, changedCredit());
+        normalizeService.normalizeAll(DAY1);
+        normalizeService.normalizeAll(DAY2);
+
+        List<DiffSummary> summaries = diffService.detectChanges(DAY2);
+        diffService.detectChanges(DAY2);
+
+        DiffSummary cred = summaries.stream().filter(s -> s.type() == ProductType.CRED).findFirst().orElseThrow();
+        assertThat(cred.unresolved()).isZero();
+        assertThat(cred.eventsInserted()).isEqualTo(3);
+        assertThat(jdbc.queryForList("""
+                SELECT e.event_type || ':' || o.lend_rate_type FROM change_event e
+                JOIN credit_loan_product p ON p.id = e.credit_loan_product_id
+                JOIN credit_loan_option o ON o.id = e.credit_loan_option_id
+                WHERE e.product_id IS NULL AND p.inst_code = '0010016' AND p.product_code = 'WR0002F'
+                    AND p.credit_product_type = '2'
+                ORDER BY 1
+                """, String.class)).containsExactly("OPTION_REMOVED:D", "RATE_DOWN:A", "RATE_UP:A");
+        // A 의 1구간·평균 2행 + 사라진 D 의 금리 4행(1·4·6구간, 평균)
+        assertThat(jdbc.queryForList("SELECT field FROM credit_rate_history WHERE changed_on = ? ORDER BY field",
+                String.class, DAY2)).containsExactly(
+                "rate_avg", "rate_avg", "rate_grade_1", "rate_grade_1", "rate_grade_4", "rate_grade_6");
+        JsonNode down = MAPPER.readTree(jdbc.queryForObject("""
+                SELECT payload::text FROM change_event WHERE credit_loan_product_id IS NOT NULL AND event_type = 'RATE_DOWN'
+                """, String.class));
+        assertThat(down.path("changes").get(0).path("field").asText()).isEqualTo("rate_avg");
+    }
+
+    @Test
     void 원문이_없는_날짜면_실패() {
         assertThatThrownBy(() -> diffService.detectChanges(DAY2.plusDays(1)))
                 .hasMessageContaining("raw_snapshot 없음");
@@ -215,11 +250,29 @@ class RateDiffServiceTest {
         return root;
     }
 
+    // 0010016/WR0002F 마이너스한도의 대출금리(A) 1구간 인상·평균 인하, 가감조정금리(D) 삭제
+    private static ObjectNode changedCredit() throws IOException {
+        ObjectNode root = fixture(CREDIT);
+        ArrayNode options = (ArrayNode) root.path("result").path("optionList");
+        for (int i = options.size() - 1; i >= 0; i--) {
+            ObjectNode o = (ObjectNode) options.get(i);
+            boolean target = o.path("fin_co_no").asText().equals("0010016")
+                    && o.path("fin_prdt_cd").asText().equals("WR0002F") && o.path("crdt_prdt_type").asText().equals("2");
+            if (target && o.path("crdt_lend_rate_type").asText().equals("A")) {
+                o.put("crdt_grad_1", 6.90).put("crdt_grad_avg", 6.70);
+            } else if (target && o.path("crdt_lend_rate_type").asText().equals("D")) {
+                options.remove(i);
+            }
+        }
+        return root;
+    }
+
     private void insertDay(LocalDate day, ObjectNode deposit) throws IOException {
         insertRaw(day, ProductType.DEP, deposit);
         insertRaw(day, ProductType.SAV, fixture("savingProductsSearch_020000_p1"));
         insertRaw(day, ProductType.MORT, fixture("mortgageLoanProductsSearch_020000_p1"));
         insertRaw(day, ProductType.RENT, fixture("rentHouseLoanProductsSearch_020000_p1"));
+        insertRaw(day, ProductType.CRED, fixture(CREDIT));
     }
 
     private void replaceDeposit(LocalDate day, ObjectNode deposit) {

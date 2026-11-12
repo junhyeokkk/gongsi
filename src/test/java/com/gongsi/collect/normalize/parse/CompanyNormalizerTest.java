@@ -21,7 +21,7 @@ class CompanyNormalizerTest {
 
     @Test
     void 회사_base_를_컬럼으로_옮김() throws IOException {
-        NormalizedCompany c = CompanyNormalizer.normalizeBase(first("baseList"));
+        NormalizedCompany c = CompanyNormalizer.INSTANCE.normalizeBase(first("baseList"));
 
         assertThat(c.finCoNo()).isEqualTo("0010001");
         assertThat(c.companyName()).isEqualTo("우리은행");
@@ -34,7 +34,7 @@ class CompanyNormalizerTest {
 
     @Test
     void 지역_옵션은_exis_yn_을_영업점_유무로() throws IOException {
-        NormalizedCompanyArea a = CompanyNormalizer.normalizeOption(first("optionList"));
+        NormalizedCompanyArea a = CompanyNormalizer.INSTANCE.normalizeOption(first("optionList"));
 
         assertThat(a).isEqualTo(new NormalizedCompanyArea("0010001", "01", "서울", true));
     }
@@ -44,7 +44,7 @@ class CompanyNormalizerTest {
         ObjectNode b = (ObjectNode) first("baseList");
         b.remove("kor_co_nm");
 
-        assertThatThrownBy(() -> CompanyNormalizer.normalizeBase(b))
+        assertThatThrownBy(() -> CompanyNormalizer.INSTANCE.normalizeBase(b))
                 .isInstanceOfSatisfying(NormalizeException.class,
                         e -> assertThat(e.reason()).isEqualTo(NormalizeErrorReason.MISSING_REQUIRED));
     }
@@ -54,7 +54,7 @@ class CompanyNormalizerTest {
         ObjectNode o = (ObjectNode) first("optionList");
         o.put("exis_yn", "X");
 
-        assertThatThrownBy(() -> CompanyNormalizer.normalizeOption(o))
+        assertThatThrownBy(() -> CompanyNormalizer.INSTANCE.normalizeOption(o))
                 .isInstanceOfSatisfying(NormalizeException.class,
                         e -> assertThat(e.reason()).isEqualTo(NormalizeErrorReason.UNKNOWN_ENUM));
     }
@@ -64,7 +64,7 @@ class CompanyNormalizerTest {
         ObjectNode b = (ObjectNode) first("baseList");
         b.put("cal_tel", "1".repeat(21));
 
-        assertThatThrownBy(() -> CompanyNormalizer.normalizeBase(b))
+        assertThatThrownBy(() -> CompanyNormalizer.INSTANCE.normalizeBase(b))
                 .isInstanceOfSatisfying(NormalizeException.class,
                         e -> assertThat(e.reason()).isEqualTo(NormalizeErrorReason.TYPE_MISMATCH));
     }
@@ -74,8 +74,8 @@ class CompanyNormalizerTest {
         for (String finGrpNo : new String[]{"020000", "030300"}) {
             JsonNode result = MAPPER.readTree(RAW_DIR.resolve("companySearch_" + finGrpNo + "_p1_20261031.json").toFile())
                     .path("result");
-            result.path("baseList").forEach(CompanyNormalizer::normalizeBase);
-            result.path("optionList").forEach(CompanyNormalizer::normalizeOption);
+            result.path("baseList").forEach(CompanyNormalizer.INSTANCE::normalizeBase);
+            result.path("optionList").forEach(CompanyNormalizer.INSTANCE::normalizeOption);
         }
     }
 

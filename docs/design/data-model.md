@@ -77,6 +77,7 @@ company ─< company_area                                           금융회사
 ### 흐름
 
 상품군 하나 = 트랜잭션 하나. 그날 그 상품군의 원문 전 페이지를 읽어서:
+(신용대출도 같은 흐름이고 적재 테이블만 `credit_loan_product`·`credit_loan_option` 이다)
 
 1. baseList → 상품 행, optionList → 옵션 행으로 변환. 실패한 레코드만 `normalize_error` 로 격리하고 계속
 2. 모든 페이지를 다 본 뒤 정상 base 가 없는 옵션을 `ORPHAN_OPTION` 으로 격리 — base 와 옵션이 다른 페이지에 있을 수 있다
@@ -95,6 +96,7 @@ company ─< company_area                                           금융회사
 | 적금 | 기간\|금리유형\|적립유형 | `12\|S\|F` | 같은 기간·금리유형에 정액(S)·자유(F) 적립이 함께 있다 |
 | 주담대 | 담보\|상환\|금리유형 | `A\|D\|F` | (mrtg + rpay + lend_rate_type) 268/268 유일 |
 | 전세 | 상환\|금리유형 | `D\|C` | 담보유형 필드가 없다 |
+| 신용대출 | 금리종류 | `A` | 상품 자연키에 `crdt_prdt_type` 이 들어가 상품 안에서는 A~D 가 유일. `credit_loan_option.lend_rate_type` 이 곧 옵션키 |
 
 옵션키가 날마다 같아야 금리를 어제 값과 1:1 로 비교할 수 있다(변동 감지, ADR-0003).
 
@@ -106,7 +108,7 @@ company ─< company_area                                           금융회사
 | --- | --- | --- |
 | `MISSING_REQUIRED` | 기관코드·상품코드·기관명·상품명·공시월, 옵션의 기간·유형이 없음 | 자연키·옵션키를 만들 수 없다 |
 | `TYPE_MISMATCH` | 기간이 숫자가 아님, 날짜가 `yyyyMMdd`·`yyyyMMddHHmm` 이 아님, 금리 > 999.99, 문자열이 컬럼 길이 초과 | 그대로 넣으면 DB 오류로 상품군 전체가 롤백된다 |
-| `UNKNOWN_ENUM` | 코드값이 정의 밖 (금리유형 S/M, 적립 S/F, 담보 A/E, 상환 D/S, 대출금리 F/C, 가입제한 1/2/3) | 모르는 코드로 옵션키를 만들면 다음 날 비교가 어긋난다 |
+| `UNKNOWN_ENUM` | 코드값이 정의 밖 (금리유형 S/M, 적립 S/F, 담보 A/E, 상환 D/S, 대출금리 F/C, 가입제한 1/2/3, 신용상품유형 1/2/3, 신용금리종류 A~D) | 모르는 코드로 옵션키를 만들면 다음 날 비교가 어긋난다 |
 | `ORPHAN_OPTION` | 같은 날 원문에 정상 base 가 없는 옵션 | 부모 product 가 없어 FK 를 걸 수 없다 |
 
 `detail` 에는 원문 전체가 아니라 `기관코드/상품코드: 사유` 만 남긴다. 원문은 `raw_snapshot_id` 로 찾아간다.
@@ -117,6 +119,7 @@ company ─< company_area                                           금융회사
 - `save_trm` 문자열 → SMALLINT
 - 빈 문자열 → null
 - 상품군에 없는 필드는 null (예금의 `loan_lmt` 등)
+- 신용대출 `cb_name` 은 대문자로 (`kcb` → `KCB`). `"NICE,KCB"`·`"NICE, KCB"` 같은 복수 표기는 그대로 둔다
 
 ## 5. 변경 감지
 
@@ -133,7 +136,11 @@ diff Step(`collect/diff/`)이 normalize 다음에 돈다. 상품군마다 target
 ### 비교 대상
 
 `base_rate`·`max_rate`(예·적금), `rate_min`·`rate_max`(대출). `rate_avg` 는 null 이 많아 뺀다. 2.5 와 2.50 은 같은 값이다.
-신용대출(`credit_*`)은 정규화가 없어 아직 대상이 아니다.
+
+신용대출은 `rate_grade_1`…`rate_grade_13`(8개)과 `rate_avg` 를 비교해 `credit_rate_history` 에 남기고, change_event 는
+`credit_loan_product_id`·`credit_loan_option_id` 로 발행한다(`uk_change_event_credit`). 신용대출 `rate_avg`(`crdt_grad_avg`)는
+원문에서 null 이 0건이라 포함한다. 금리 종류 A~D 행을 모두 비교한다 — 기준금리(B)가 바뀌면 대출금리(A)와 함께 이벤트가 2건 생기며,
+알림에서 A 만 볼지는 notify 단계에서 고른다. 판정·격리 상품 제외·급변 검사 규칙은 아래와 같다.
 
 ### 판정
 
@@ -158,7 +165,7 @@ payload 는 `{"changes":[{"field":"max_rate","old":3.10,"new":3.20}]}` 이고 �
 
 ### 재처리
 
-- 같은 날짜 재실행: `uk_rate_history`, `uk_change_event_product` 로 행이 늘지 않는다
+- 같은 날짜 재실행: `uk_rate_history`·`uk_credit_rate_history`, `uk_change_event_product`·`uk_change_event_credit` 로 행이 늘지 않는다
 - 역순 처리: (직전일, 당일) 원문 쌍만 보므로 normalize·diff 순서와 결과가 무관하다
 - 결측일 백필: 그다음 날짜의 기존 행은 갱신되지 않는다. 그 날짜 행을 지우고 다시 돌린다(알림이 나간 이벤트는 제외)
 
@@ -174,6 +181,9 @@ payload 는 `{"changes":[{"field":"max_rate","old":3.10,"new":3.20}]}` 이고 �
 
 주말(10-31·11-01) 원문은 `now_page_no` 외에 같았다.
 
+신용대출(서버 백업 11-08~11-11, 기준선 11-01): 11-01 → 11-08 → … → 11-11 모두 0건. 금리가 월 공시(`dcls_month`)라
+같은 달 안에서는 원문이 같다. 11-10 저축은행 원문이 바뀐 것은 기관명(`SBI저축은행` → `교보SBI저축은행`) 하나였다.
+
 ## 6. 실측 결과
 
 로컬 DB, 2026-10-30 원문
@@ -184,8 +194,12 @@ payload 는 `{"changes":[{"field":"max_rate","old":3.10,"new":3.20}]}` 이고 �
 | SAV | 4 | 337 | 1,534 | 0 |
 | MORT | 2 | 92 | 268 | 0 |
 | RENT | 2 | 49 | 96 | 0 |
+| CRED | 2 | 80 | 246 | 0 |
+
+신용대출 4권역(2026-11-08~11-11 매일 같음): 상품 115 / 옵션 284 / 격리 0.
+권역별 상품은 은행 44(일반 18·마이너스 18·카드론 8), 여신전문 29(일반 21·카드론 8), 저축은행 36, 보험 6.
+`0010016/WR0002F` 는 마이너스한도·카드론 두 행으로 적재된다.
 
 ## 7. 아직 안 한 것
 
-- 신용대출 정규화 (`credit_loan_*` 적재)
 - 여신전문(030200)·보험(050000) 상품 정규화 실측 (2026-11-01 수집 추가)

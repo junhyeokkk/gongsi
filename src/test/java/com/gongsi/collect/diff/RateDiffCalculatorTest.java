@@ -1,5 +1,7 @@
 package com.gongsi.collect.diff;
 
+import com.gongsi.collect.normalize.model.CreditProductKey;
+import com.gongsi.collect.normalize.model.NormalizedCreditOption;
 import com.gongsi.collect.normalize.model.NormalizedOption;
 import com.gongsi.collect.normalize.model.ProductKey;
 import org.junit.jupiter.api.Test;
@@ -24,11 +26,11 @@ class RateDiffCalculatorTest {
         var prev = Map.of(A, options(deposit(A, "12|S", "2.50", "3.00")));
         var today = Map.of(A, options(deposit(A, "12|S", "2.40", "3.20")));
 
-        DiffResult result = RateDiffCalculator.compare(prev, today);
+        DiffResult<ProductKey> result = RateDiffCalculator.compare(prev, today, Set.of(), ProductRateField.ALL);
 
         assertThat(result.rateChanges()).extracting(RateChange::field, RateChange::oldValue, RateChange::newValue)
-                .containsExactly(tuple(RateField.BASE_RATE, dec("2.50"), dec("2.40")),
-                        tuple(RateField.MAX_RATE, dec("3.00"), dec("3.20")));
+                .containsExactly(tuple(ProductRateField.BASE_RATE, dec("2.50"), dec("2.40")),
+                        tuple(ProductRateField.MAX_RATE, dec("3.00"), dec("3.20")));
         assertThat(result.events()).extracting(DetectedEvent::type, e -> e.changes().size())
                 .containsExactly(tuple(ChangeEventType.RATE_UP, 1), tuple(ChangeEventType.RATE_DOWN, 1));
     }
@@ -38,7 +40,7 @@ class RateDiffCalculatorTest {
         var prev = Map.of(A, options(deposit(A, "12|S", "2.5", "3")));
         var today = Map.of(A, options(deposit(A, "12|S", "2.50", "3.00")));
 
-        DiffResult result = RateDiffCalculator.compare(prev, today);
+        DiffResult<ProductKey> result = RateDiffCalculator.compare(prev, today, Set.of(), ProductRateField.ALL);
 
         assertThat(result.rateChanges()).isEmpty();
         assertThat(result.events()).isEmpty();
@@ -49,10 +51,10 @@ class RateDiffCalculatorTest {
         var prev = Map.of(A, options(deposit(A, "12|S", "2.50", null)));
         var today = Map.of(A, options(deposit(A, "12|S", "2.50", "3.00")));
 
-        DiffResult result = RateDiffCalculator.compare(prev, today);
+        DiffResult<ProductKey> result = RateDiffCalculator.compare(prev, today, Set.of(), ProductRateField.ALL);
 
         assertThat(result.rateChanges()).extracting(RateChange::field, RateChange::oldValue)
-                .containsExactly(tuple(RateField.MAX_RATE, null));
+                .containsExactly(tuple(ProductRateField.MAX_RATE, null));
         assertThat(result.events()).isEmpty();
     }
 
@@ -61,7 +63,7 @@ class RateDiffCalculatorTest {
         var prev = Map.of(A, options(deposit(A, "12|S", "2.50", "3.00"), deposit(A, "6|S", "2.00", "2.20")));
         var today = Map.of(A, options(deposit(A, "12|S", "2.50", "3.00"), deposit(A, "24|S", "2.70", "3.10")));
 
-        DiffResult result = RateDiffCalculator.compare(prev, today);
+        DiffResult<ProductKey> result = RateDiffCalculator.compare(prev, today, Set.of(), ProductRateField.ALL);
 
         assertThat(result.events()).extracting(DetectedEvent::optionKey, DetectedEvent::type)
                 .containsExactly(tuple("24|S", ChangeEventType.NEW), tuple("6|S", ChangeEventType.OPTION_REMOVED));
@@ -76,13 +78,13 @@ class RateDiffCalculatorTest {
         var prev = Map.of(A, options(deposit(A, "12|S", "2.50", "3.00")));
         var today = Map.of(B, options(deposit(B, "12|S", "2.60", null)));
 
-        DiffResult result = RateDiffCalculator.compare(prev, today);
+        DiffResult<ProductKey> result = RateDiffCalculator.compare(prev, today, Set.of(), ProductRateField.ALL);
 
         assertThat(result.events()).extracting(DetectedEvent::product, DetectedEvent::optionKey, DetectedEvent::type)
                 .containsExactly(tuple(B, null, ChangeEventType.NEW), tuple(A, null, ChangeEventType.CLOSED));
         assertThat(result.rateChanges()).extracting(RateChange::product, RateChange::field)
-                .containsExactly(tuple(B, RateField.BASE_RATE),
-                        tuple(A, RateField.BASE_RATE), tuple(A, RateField.MAX_RATE));
+                .containsExactly(tuple(B, ProductRateField.BASE_RATE),
+                        tuple(A, ProductRateField.BASE_RATE), tuple(A, ProductRateField.MAX_RATE));
     }
 
     @Test
@@ -91,7 +93,7 @@ class RateDiffCalculatorTest {
                 B, options(deposit(B, "12|S", "2.50", "3.00")));
         var today = Map.of(A, options(deposit(A, "12|S", "2.50", "3.00")));
 
-        DiffResult result = RateDiffCalculator.compare(prev, today, Set.of(A, B));
+        DiffResult<ProductKey> result = RateDiffCalculator.compare(prev, today, Set.of(A, B), ProductRateField.ALL);
 
         assertThat(result.events()).isEmpty();
         assertThat(result.rateChanges()).isEmpty();
@@ -102,10 +104,31 @@ class RateDiffCalculatorTest {
         var prev = Map.of(A, options(loan(A, "A|D|F", "3.10", "5.00", "4.00")));
         var today = Map.of(A, options(loan(A, "A|D|F", "3.10", "4.80", "4.50")));
 
-        DiffResult result = RateDiffCalculator.compare(prev, today);
+        DiffResult<ProductKey> result = RateDiffCalculator.compare(prev, today, Set.of(), ProductRateField.ALL);
 
-        assertThat(result.rateChanges()).extracting(RateChange::field).containsExactly(RateField.RATE_MAX);
+        assertThat(result.rateChanges()).extracting(RateChange::field).containsExactly(ProductRateField.RATE_MAX);
         assertThat(result.events()).extracting(DetectedEvent::type).containsExactly(ChangeEventType.RATE_DOWN);
+    }
+
+    @Test
+    void 신용대출은_구간금리와_평균을_비교하고_금리종류가_옵션키() {
+        CreditProductKey c = new CreditProductKey("0010016", "WR0002F", "2");
+        var prev = Map.of(c, Map.of("A", credit(c, "A", "6.68", null, "6.77"), "D", credit(c, "D", "0.47", null, "0.39")));
+        var today = Map.of(c, Map.of("A", credit(c, "A", "6.90", "7.10", "6.70")));
+
+        DiffResult<CreditProductKey> result = RateDiffCalculator.compare(prev, today, Set.of(), CreditRateField.ALL);
+
+        assertThat(result.events()).extracting(DetectedEvent::optionKey, DetectedEvent::type)
+                .containsExactlyInAnyOrder(tuple("A", ChangeEventType.RATE_UP), tuple("A", ChangeEventType.RATE_DOWN),
+                        tuple("D", ChangeEventType.OPTION_REMOVED));
+        assertThat(result.rateChanges()).filteredOn(ch -> ch.optionKey().equals("A"))
+                .extracting(RateChange::field, RateChange::oldValue)
+                .containsExactly(tuple(CreditRateField.RATE_GRADE_1, dec("6.68")),
+                        tuple(CreditRateField.RATE_GRADE_10, null), tuple(CreditRateField.RATE_AVG, dec("6.77")));
+    }
+
+    private static NormalizedCreditOption credit(CreditProductKey key, String type, String g1, String g10, String avg) {
+        return new NormalizedCreditOption(key, type, dec(g1), null, null, null, dec(g10), null, null, null, dec(avg));
     }
 
     private static Map<String, NormalizedOption> options(NormalizedOption... options) {

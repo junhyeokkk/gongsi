@@ -86,6 +86,26 @@ public class ProductUpsertService {
         this.jdbc = jdbc;
     }
 
+    // 한 상품군에 묶은 적재기
+    public ProductStore<ProductKey, NormalizedProduct, NormalizedOption> forType(ProductType type) {
+        return new ProductStore<>() {
+            @Override
+            public Map<ProductKey, Long> upsertProducts(List<NormalizedProduct> products, LocalDate seenOn) {
+                return ProductUpsertService.this.upsertProducts(type, products, seenOn);
+            }
+
+            @Override
+            public void upsertOptions(List<NormalizedOption> options, Map<ProductKey, Long> ids, LocalDate seenOn) {
+                ProductUpsertService.this.upsertOptions(options, ids, seenOn);
+            }
+
+            @Override
+            public int deactivateMissing(LocalDate seenOn) {
+                return ProductUpsertService.this.deactivateMissing(type, seenOn);
+            }
+        };
+    }
+
     // 상품을 적재하고 그 상품군의 자연키 → product.id 를 돌려줌
     public Map<ProductKey, Long> upsertProducts(ProductType type, List<NormalizedProduct> products, LocalDate seenOn) {
         Date seen = Date.valueOf(seenOn);

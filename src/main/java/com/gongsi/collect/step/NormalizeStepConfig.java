@@ -12,7 +12,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.time.LocalDate;
 
-// Step 2 - raw_snapshot → product / product_option, company / company_area upsert, 오염 레코드는 normalize_error 로 격리
+// Step 2 - raw_snapshot → product / product_option, credit_loan_*, company / company_area upsert, 오염 레코드는 normalize_error 로 격리
 @Configuration
 public class NormalizeStepConfig {
 

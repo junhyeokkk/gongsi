@@ -1,5 +1,6 @@
 package com.gongsi.collect.diff;
 
+import com.gongsi.collect.normalize.model.CreditProductKey;
 import com.gongsi.collect.normalize.model.ProductKey;
 import com.gongsi.common.ProductType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -8,7 +9,7 @@ import org.springframework.stereotype.Repository;
 import java.util.HashMap;
 import java.util.Map;
 
-// 자연키 → product.id / product_option.id - 변동 행을 FK 로 적재하려고 상품군 단위로 한 번 읽는다
+// 자연키 → 상품·옵션 id - 변동 행을 FK 로 적재하려고 상품군 단위로 한 번 읽는다
 @Repository
 public class ProductIdRepository {
 
@@ -18,9 +19,10 @@ public class ProductIdRepository {
         this.jdbc = jdbc;
     }
 
-    public Ids load(ProductType type) {
+    // product·product_option
+    public Ids<ProductKey> load(ProductType type) {
         Map<ProductKey, Long> products = new HashMap<>();
-        Map<OptionRef, Long> options = new HashMap<>();
+        Map<OptionRef<ProductKey>, Long> options = new HashMap<>();
         jdbc.query("""
                         SELECT p.id AS product_id, p.inst_code, p.product_code, o.id AS option_id, o.option_key
                         FROM product p LEFT JOIN product_option o ON o.product_id = p.id
@@ -31,25 +33,46 @@ public class ProductIdRepository {
                     products.put(key, rs.getLong("product_id"));
                     String optionKey = rs.getString("option_key");
                     if (optionKey != null) {
-                        options.put(new OptionRef(key, optionKey), rs.getLong("option_id"));
+                        options.put(new OptionRef<>(key, optionKey), rs.getLong("option_id"));
                     }
                 }, type.name());
-        return new Ids(products, options);
+        return new Ids<>(products, options);
+    }
+
+    // credit_loan_product·credit_loan_option - 옵션키는 금리 종류
+    public Ids<CreditProductKey> loadCredit() {
+        Map<CreditProductKey, Long> products = new HashMap<>();
+        Map<OptionRef<CreditProductKey>, Long> options = new HashMap<>();
+        jdbc.query("""
+                        SELECT p.id AS product_id, p.inst_code, p.product_code, p.credit_product_type,
+                            o.id AS option_id, o.lend_rate_type
+                        FROM credit_loan_product p LEFT JOIN credit_loan_option o ON o.credit_loan_product_id = p.id
+                        """,
+                rs -> {
+                    CreditProductKey key = new CreditProductKey(rs.getString("inst_code"),
+                            rs.getString("product_code"), rs.getString("credit_product_type"));
+                    products.put(key, rs.getLong("product_id"));
+                    String optionKey = rs.getString("lend_rate_type");
+                    if (optionKey != null) {
+                        options.put(new OptionRef<>(key, optionKey), rs.getLong("option_id"));
+                    }
+                });
+        return new Ids<>(products, options);
     }
 
     // 상품 안에서 옵션을 가리키는 자연키
-    public record OptionRef(ProductKey product, String optionKey) {
+    public record OptionRef<K>(K product, String optionKey) {
     }
 
     // 한 상품군의 자연키 → id 표
-    public record Ids(Map<ProductKey, Long> products, Map<OptionRef, Long> options) {
+    public record Ids<K>(Map<K, Long> products, Map<OptionRef<K>, Long> options) {
 
-        public Long product(ProductKey key) {
+        public Long product(K key) {
             return products.get(key);
         }
 
-        public Long option(ProductKey key, String optionKey) {
-            return options.get(new OptionRef(key, optionKey));
+        public Long option(K key, String optionKey) {
+            return options.get(new OptionRef<>(key, optionKey));
         }
     }
 }

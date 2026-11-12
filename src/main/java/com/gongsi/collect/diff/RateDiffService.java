@@ -2,11 +2,14 @@ package com.gongsi.collect.diff;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gongsi.collect.diff.ChangeEventPublisher.ProductEvent;
+import com.gongsi.collect.diff.ChangeEventPublisher.Event;
 import com.gongsi.collect.diff.ProductIdRepository.Ids;
 import com.gongsi.collect.fetch.RawSnapshotRepository;
 import com.gongsi.collect.fetch.RawSnapshotRepository.RawPage;
 import com.gongsi.collect.normalize.NormalizeService;
+import com.gongsi.collect.normalize.parse.CreditNormalizer;
+import com.gongsi.collect.normalize.parse.Normalizer;
+import com.gongsi.collect.normalize.parse.RecordParser;
 import com.gongsi.common.GongsiException;
 import com.gongsi.common.ProductType;
 import org.slf4j.Logger;
@@ -22,9 +25,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-// DiffStep 이 호출 - targetDate 원문을 권역별 직전 수집일 원문과 비교해 rate_history·change_event 적재 (ADR-0003)
+// DiffStep 이 호출 - targetDate 원문을 권역별 직전 수집일 원문과 비교해 이력·change_event 적재 (ADR-0003)
 @Service
 public class RateDiffService {
 
@@ -60,6 +64,13 @@ public class RateDiffService {
     }
 
     DiffSummary detect(ProductType type, LocalDate targetDate) {
+        return type == ProductType.CRED
+                ? detect(type, targetDate, CreditNormalizer.INSTANCE, CreditRateField.ALL, idRepo::loadCredit)
+                : detect(type, targetDate, Normalizer.of(type), ProductRateField.ALL, () -> idRepo.load(type));
+    }
+
+    private <K, B, O> DiffSummary detect(ProductType type, LocalDate targetDate, RecordParser<K, B, O> parser,
+                                         List<? extends RateField<O>> fields, Supplier<Ids<K>> idLoader) {
         List<RawPage> todayPages = rawRepo.findByDate(targetDate, type);
         if (todayPages.isEmpty()) {
             throw new GongsiException("raw_snapshot 없음 fetchedOn=%s type=%s".formatted(targetDate, type));
@@ -71,16 +82,17 @@ public class RateDiffService {
         List<RawPage> today = todayPages.stream().filter(p -> prevDates.containsKey(p.finGrpNo())).toList();
         Set<String> groups = today.stream().map(RawPage::finGrpNo).collect(Collectors.toSet());
 
-        RawRates prev = reader.read(type, prevPages(type, prevDates, groups));
-        RawRates now = reader.read(type, today);
-        DiffResult result = RateDiffCalculator.compare(prev.products(), now.products(), now.quarantined());
+        RawRates<K, O> prev = reader.read(parser, prevPages(type, prevDates, groups));
+        RawRates<K, O> now = reader.read(parser, today);
+        DiffResult<K> result = RateDiffCalculator.compare(prev.products(), now.products(), now.quarantined(), fields);
         checkNotPartial(type, targetDate, result, prev.products().size(), now.products().size());
-        Ids ids = idRepo.load(type);
+        Ids<K> ids = idLoader.get();
         Unresolved unresolved = new Unresolved();
         List<RateHistoryRepository.Row> rows = toRows(result.rateChanges(), ids, unresolved);
-        List<ProductEvent> events = toEvents(result.events(), ids, unresolved);
-        int rateInserted = historyRepo.insertAll(targetDate, rows);
-        int eventInserted = publisher.publishProductEvents(targetDate, events);
+        List<Event> events = toEvents(result.events(), ids, unresolved);
+        ProductFamily family = ProductFamily.of(type);
+        int rateInserted = historyRepo.insertAll(family, targetDate, rows);
+        int eventInserted = publisher.publish(family, targetDate, events);
 
         Map<ChangeEventType, Long> detected = result.events().stream()
                 .collect(Collectors.groupingBy(DetectedEvent::type, TreeMap::new, Collectors.counting()));
@@ -91,7 +103,7 @@ public class RateDiffService {
     }
 
     // 상품이 한꺼번에 사라지거나 생기면 어느 한쪽 원문이 페이지 일부만 받은 것으로 보고 멈춘다 - 거짓 알림 방지
-    private static void checkNotPartial(ProductType type, LocalDate targetDate, DiffResult result,
+    private static void checkNotPartial(ProductType type, LocalDate targetDate, DiffResult<?> result,
                                         int prevProducts, int todayProducts) {
         long closed = productEvents(result, ChangeEventType.CLOSED);
         long added = productEvents(result, ChangeEventType.NEW);
@@ -101,7 +113,7 @@ public class RateDiffService {
         }
     }
 
-    private static long productEvents(DiffResult result, ChangeEventType type) {
+    private static long productEvents(DiffResult<?> result, ChangeEventType type) {
         return result.events().stream().filter(e -> e.optionKey() == null && e.type() == type).count();
     }
 
@@ -119,35 +131,36 @@ public class RateDiffService {
         return pages;
     }
 
-    private static List<RateHistoryRepository.Row> toRows(List<RateChange> changes, Ids ids, Unresolved unresolved) {
+    private static <K> List<RateHistoryRepository.Row> toRows(List<RateChange<K>> changes, Ids<K> ids,
+                                                              Unresolved unresolved) {
         List<RateHistoryRepository.Row> rows = new ArrayList<>();
-        for (RateChange c : changes) {
+        for (RateChange<K> c : changes) {
             Long optionId = ids.option(c.product(), c.optionKey());
             if (optionId == null) {
                 unresolved.add(c.product() + "|" + c.optionKey());
                 continue;
             }
-            rows.add(new RateHistoryRepository.Row(optionId, c.field(), c.oldValue(), c.newValue()));
+            rows.add(new RateHistoryRepository.Row(optionId, c.field().column(), c.oldValue(), c.newValue()));
         }
         return rows;
     }
 
-    private List<ProductEvent> toEvents(List<DetectedEvent> detected, Ids ids, Unresolved unresolved) {
-        List<ProductEvent> events = new ArrayList<>();
-        for (DetectedEvent e : detected) {
+    private <K> List<Event> toEvents(List<DetectedEvent<K>> detected, Ids<K> ids, Unresolved unresolved) {
+        List<Event> events = new ArrayList<>();
+        for (DetectedEvent<K> e : detected) {
             Long productId = ids.product(e.product());
             Long optionId = e.optionKey() == null ? null : ids.option(e.product(), e.optionKey());
             if (productId == null || (e.optionKey() != null && optionId == null)) {
                 unresolved.add(e.product() + "|" + e.optionKey());
                 continue;
             }
-            events.add(new ProductEvent(productId, optionId, e.type(), payload(e.changes())));
+            events.add(new Event(productId, optionId, e.type(), payload(e.changes())));
         }
         return events;
     }
 
     // RATE_UP/DOWN 은 바뀐 필드와 전후 값, 나머지는 null
-    private String payload(List<RateChange> changes) {
+    private String payload(List<? extends RateChange<?>> changes) {
         if (changes.isEmpty()) {
             return null;
         }
