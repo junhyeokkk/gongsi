@@ -157,7 +157,7 @@ class NormalizerTest {
         }
     }
 
-    // 신용대출은 미지원, companySearch 는 CompanyNormalizerTest 가 본다
+    // 신용대출은 CreditNormalizerTest, companySearch 는 CompanyNormalizerTest 가 본다
     private static boolean isProductFile(Path file) {
         String name = file.getFileName().toString();
         return !name.startsWith("credit") && !name.startsWith("company");

@@ -1,17 +1,18 @@
 package com.gongsi.collect.normalize;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gongsi.collect.fetch.RawSnapshotRepository;
 import com.gongsi.collect.fetch.RawSnapshotRepository.RawPage;
-import com.gongsi.collect.normalize.model.NormalizedOption;
-import com.gongsi.collect.normalize.model.NormalizedProduct;
-import com.gongsi.collect.normalize.model.ProductKey;
+import com.gongsi.collect.normalize.RawRecordReader.Records;
+import com.gongsi.collect.normalize.RawRecordReader.Rejects;
+import com.gongsi.collect.normalize.parse.CreditNormalizer;
 import com.gongsi.collect.normalize.parse.NormalizeErrorReason;
 import com.gongsi.collect.normalize.parse.NormalizeException;
 import com.gongsi.collect.normalize.parse.Normalizer;
+import com.gongsi.collect.normalize.parse.RecordParser;
+import com.gongsi.collect.normalize.store.CreditUpsertService;
 import com.gongsi.collect.normalize.store.NormalizeErrorRecorder;
+import com.gongsi.collect.normalize.store.ProductStore;
 import com.gongsi.collect.normalize.store.ProductUpsertService;
 import com.gongsi.common.GongsiException;
 import com.gongsi.common.ProductType;
@@ -21,32 +22,34 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-// NormalizeStep 이 호출 - 그날 raw_snapshot 을 상품군별로 정규화해 product·product_option 에 반영
+// NormalizeStep 이 호출 - 그날 raw_snapshot 을 상품군별로 정규화해 product·product_option, credit_loan_* 에 반영
 @Service
 public class NormalizeService {
 
     private static final Logger log = LoggerFactory.getLogger(NormalizeService.class);
 
-    // CRED 는 credit_loan_* 대상이라 아직 제외
-    public static final List<ProductType> TYPES = List.of(ProductType.DEP, ProductType.SAV, ProductType.MORT, ProductType.RENT);
+    // CRED 는 credit_loan_* 에, 나머지는 product 에 적재
+    public static final List<ProductType> TYPES = List.of(
+            ProductType.DEP, ProductType.SAV, ProductType.MORT, ProductType.RENT, ProductType.CRED);
 
     private final RawSnapshotRepository rawRepo;
-    private final ProductUpsertService upsertService;
+    private final RawRecordReader reader;
+    private final ProductUpsertService productStore;
+    private final CreditUpsertService creditStore;
     private final NormalizeErrorRecorder errorRecorder;
-    private final ObjectMapper objectMapper;
     private final TransactionTemplate tx;
 
-    public NormalizeService(RawSnapshotRepository rawRepo, ProductUpsertService upsertService,
-                            NormalizeErrorRecorder errorRecorder, ObjectMapper objectMapper, TransactionTemplate tx) {
+    public NormalizeService(RawSnapshotRepository rawRepo, RawRecordReader reader, ProductUpsertService productStore,
+                            CreditUpsertService creditStore, NormalizeErrorRecorder errorRecorder,
+                            TransactionTemplate tx) {
         this.rawRepo = rawRepo;
-        this.upsertService = upsertService;
+        this.reader = reader;
+        this.productStore = productStore;
+        this.creditStore = creditStore;
         this.errorRecorder = errorRecorder;
-        this.objectMapper = objectMapper;
         this.tx = tx;
     }
 
@@ -56,91 +59,74 @@ public class NormalizeService {
     }
 
     NormalizeSummary normalize(LocalDate fetchedOn, ProductType type) {
+        return type == ProductType.CRED
+                ? normalize(fetchedOn, type, CreditNormalizer.INSTANCE, creditStore)
+                : normalize(fetchedOn, type, Normalizer.of(type), productStore.forType(type));
+    }
+
+    private <K, B, O> NormalizeSummary normalize(LocalDate fetchedOn, ProductType type,
+                                                 RecordParser<K, B, O> parser, ProductStore<K, B, O> store) {
         List<RawPage> pages = rawRepo.findByDate(fetchedOn, type);
         if (pages.isEmpty()) {
             // 원문 없이 진행하면 모든 상품을 소멸로 오판한다
             throw new GongsiException("raw_snapshot 없음 fetchedOn=%s type=%s".formatted(fetchedOn, type));
         }
         errorRecorder.clear(fetchedOn, type);
-        Normalizer normalizer = Normalizer.of(type);
-        ErrorSink errors = new ErrorSink(fetchedOn, type);
+        ErrorSink<K> errors = new ErrorSink<>(errorRecorder, fetchedOn, type.name());
 
-        Map<ProductKey, NormalizedProduct> products = new LinkedHashMap<>();
-        List<PendingOption> pending = new ArrayList<>();
-        for (RawPage page : pages) {
-            JsonNode result = parse(page).path("result");
-            JsonNode bases = result.path("baseList");
-            for (int i = 0; i < bases.size(); i++) {
-                try {
-                    NormalizedProduct p = normalizer.normalizeBase(bases.get(i)).withFinGrpNo(page.finGrpNo());
-                    products.put(p.key(), p);
-                } catch (NormalizeException e) {
-                    errors.add(page.id(), "BASE", i, e.reason(), describe(bases.get(i), e));
-                }
-            }
-            JsonNode options = result.path("optionList");
-            for (int i = 0; i < options.size(); i++) {
-                try {
-                    pending.add(new PendingOption(page.id(), i, normalizer.normalizeOption(options.get(i))));
-                } catch (NormalizeException e) {
-                    errors.add(page.id(), "OPTION", i, e.reason(), describe(options.get(i), e));
-                }
-            }
-        }
+        Records<K, B, O> records = reader.read(pages, parser, errors);
+        Map<K, Long> ids = store.upsertProducts(List.copyOf(records.bases().values()), fetchedOn);
+        store.upsertOptions(records.options(), ids, fetchedOn);
+        int deactivated = store.deactivateMissing(fetchedOn);
 
-        // 고아 판정은 전 페이지의 정상 base 를 모은 뒤에 한다
-        List<NormalizedOption> options = new ArrayList<>();
-        for (PendingOption o : pending) {
-            if (products.containsKey(o.option().productKey())) {
-                options.add(o.option());
-            } else {
-                errors.add(o.rawSnapshotId(), "OPTION", o.index(), NormalizeErrorReason.ORPHAN_OPTION,
-                        o.option().productKey() + " base 없음");
-            }
-        }
-
-        Map<ProductKey, Long> ids = upsertService.upsertProducts(type, List.copyOf(products.values()), fetchedOn);
-        upsertService.upsertOptions(options, ids, fetchedOn);
-        int deactivated = upsertService.deactivateMissing(type, fetchedOn);
-
-        var summary = new NormalizeSummary(type, pages.size(), products.size(), options.size(), errors.count, deactivated);
+        var summary = new NormalizeSummary(type, pages.size(), records.bases().size(), records.options().size(),
+                errors.count(), deactivated);
         log.info("normalize {} fetchedOn={} pages={} products={} options={} errors={} deactivated={}",
                 type, fetchedOn, summary.pages(), summary.products(), summary.options(), summary.errors(), deactivated);
         return summary;
     }
 
-    private JsonNode parse(RawPage page) {
-        try {
-            return objectMapper.readTree(page.payload());
-        } catch (JsonProcessingException e) {
-            // fetch 가 파싱을 통과한 원문만 적재하므로 여기 오면 DB 가 오염된 것
-            throw new GongsiException("raw_snapshot 파싱 실패 id=" + page.id(), e);
-        }
-    }
-
-    // 어느 레코드인지 찾을 수 있게 자연키와 사유만
-    private static String describe(JsonNode record, NormalizeException e) {
-        return record.path("fin_co_no").asText("?") + "/" + record.path("fin_prdt_cd").asText("?") + ": " + e.getMessage();
-    }
-
-    // 고아 판정 전까지 원문 위치를 들고 있는 옵션
-    private record PendingOption(long rawSnapshotId, int index, NormalizedOption option) {
-    }
-
-    // 에러를 기록하면서 개수를 센다
-    private final class ErrorSink {
+    // 걸러진 레코드를 normalize_error 에 남기면서 개수를 센다 - dataset 은 상품군 코드 또는 COMPANY
+    static final class ErrorSink<K> implements Rejects<K> {
+        private final NormalizeErrorRecorder recorder;
         private final LocalDate fetchedOn;
-        private final ProductType type;
+        private final String dataset;
         private int count;
 
-        ErrorSink(LocalDate fetchedOn, ProductType type) {
+        ErrorSink(NormalizeErrorRecorder recorder, LocalDate fetchedOn, String dataset) {
+            this.recorder = recorder;
             this.fetchedOn = fetchedOn;
-            this.type = type;
+            this.dataset = dataset;
         }
 
-        void add(long rawSnapshotId, String listKind, int index, NormalizeErrorReason reason, String detail) {
-            errorRecorder.record(fetchedOn, type, rawSnapshotId, listKind, index, reason, detail);
+        @Override
+        public void failed(RawPage page, String listKind, int index, JsonNode record, NormalizeException e) {
+            add(page, listKind, index, e.reason(), describe(record) + ": " + e.getMessage());
+        }
+
+        @Override
+        public void orphan(RawPage page, int index, K parent) {
+            add(page, "OPTION", index, NormalizeErrorReason.ORPHAN_OPTION, parent + " base 없음");
+        }
+
+        int count() {
+            return count;
+        }
+
+        private void add(RawPage page, String listKind, int index, NormalizeErrorReason reason, String detail) {
+            recorder.record(fetchedOn, dataset, page.id(), listKind, index, reason, detail);
             count++;
+        }
+
+        // 어느 레코드인지 찾을 수 있게 원문의 자연키 필드만
+        private static String describe(JsonNode record) {
+            StringBuilder key = new StringBuilder(record.path("fin_co_no").asText("?"));
+            for (String field : new String[]{"fin_prdt_cd", "crdt_prdt_type"}) {
+                if (record.has(field)) {
+                    key.append('/').append(record.path(field).asText("?"));
+                }
+            }
+            return key.toString();
         }
     }
 }

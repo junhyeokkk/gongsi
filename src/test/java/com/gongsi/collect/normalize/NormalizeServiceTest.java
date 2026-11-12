@@ -55,6 +55,8 @@ class NormalizeServiceTest {
     @BeforeEach
     void setUp() {
         jdbc.update("DELETE FROM normalize_error");
+        jdbc.update("DELETE FROM credit_loan_option");
+        jdbc.update("DELETE FROM credit_loan_product");
         jdbc.update("DELETE FROM product_option");
         jdbc.update("DELETE FROM product");
         jdbc.update("DELETE FROM raw_snapshot");
@@ -122,6 +124,52 @@ class NormalizeServiceTest {
     }
 
     @Test
+    void 신용대출은_유형까지_자연키로_적재하고_재실행해도_같음() throws IOException {
+        insertDay(DAY, fixture("depositProductsSearch_020000_p1"));
+
+        normalizeService.normalizeAll(DAY);
+        List<NormalizeSummary> again = normalizeService.normalizeAll(DAY);
+
+        NormalizeSummary cred = again.stream().filter(s -> s.type() == ProductType.CRED).findFirst().orElseThrow();
+        assertThat(cred.products()).isEqualTo(44);
+        assertThat(cred.options()).isEqualTo(139);
+        assertThat(cred.errors()).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_loan_product", Integer.class)).isEqualTo(44);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM credit_loan_option", Integer.class)).isEqualTo(139);
+        assertThat(jdbc.queryForList("""
+                SELECT credit_product_type || ':' || fin_grp_no || ':' || product_name FROM credit_loan_product
+                WHERE inst_code = '0010016' AND product_code = 'WR0002F' ORDER BY credit_product_type
+                """, String.class)).containsExactly("2:020000:마이너스한도대출", "3:020000:장기카드대출");
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM credit_loan_option o JOIN credit_loan_product p ON p.id = o.credit_loan_product_id
+                WHERE p.inst_code = '0010016' AND p.product_code = 'WR0002F' AND p.credit_product_type = '2'
+                """, Integer.class)).isEqualTo(4);
+    }
+
+    @Test
+    void 다음날_사라진_신용대출과_그_옵션은_비활성() throws IOException {
+        insertDay(DAY, fixture("depositProductsSearch_020000_p1"));
+        normalizeService.normalizeAll(DAY);
+
+        ObjectNode credit = fixture("creditLoanProductsSearch_020000_p1");
+        removeCredit(credit, "0010016", "WR0002F", "3");
+        LocalDate nextDay = DAY.plusDays(1);
+        insertDay(nextDay, fixture("depositProductsSearch_020000_p1"));
+        jdbc.update("DELETE FROM raw_snapshot WHERE fetched_on = ? AND product_type = 'CRED'", nextDay);
+        insertRaw(nextDay, ProductType.CRED, credit);
+        List<NormalizeSummary> summaries = normalizeService.normalizeAll(nextDay);
+
+        assertThat(summaries.stream().filter(s -> s.type() == ProductType.CRED).findFirst().orElseThrow()
+                .deactivated()).isEqualTo(1);
+        assertThat(jdbc.queryForList("""
+                SELECT p.credit_product_type || ':' || p.is_active || ':' || bool_or(o.is_active)
+                FROM credit_loan_product p JOIN credit_loan_option o ON o.credit_loan_product_id = p.id
+                WHERE p.inst_code = '0010016' AND p.product_code = 'WR0002F'
+                GROUP BY p.credit_product_type, p.is_active ORDER BY 1
+                """, String.class)).containsExactly("2:true:true", "3:false:false");
+    }
+
+    @Test
     void 원문이_없는_상품군이_있으면_실패() {
         assertThatThrownBy(() -> normalizeService.normalizeAll(DAY))
                 .hasMessageContaining("raw_snapshot 없음");
@@ -148,6 +196,21 @@ class NormalizeServiceTest {
         insertRaw(day, ProductType.SAV, fixture("savingProductsSearch_020000_p1"));
         insertRaw(day, ProductType.MORT, fixture("mortgageLoanProductsSearch_020000_p1"));
         insertRaw(day, ProductType.RENT, fixture("rentHouseLoanProductsSearch_020000_p1"));
+        insertRaw(day, ProductType.CRED, fixture("creditLoanProductsSearch_020000_p1"));
+    }
+
+    // 신용대출 원문에서 상품 하나와 그 옵션을 뺀다
+    private static void removeCredit(ObjectNode root, String inst, String code, String type) {
+        for (String list : new String[]{"baseList", "optionList"}) {
+            ArrayNode records = (ArrayNode) root.path("result").path(list);
+            for (int i = records.size() - 1; i >= 0; i--) {
+                var r = records.get(i);
+                if (r.path("fin_co_no").asText().equals(inst) && r.path("fin_prdt_cd").asText().equals(code)
+                        && r.path("crdt_prdt_type").asText().equals(type)) {
+                    records.remove(i);
+                }
+            }
+        }
     }
 
     private void insertRaw(LocalDate day, ProductType type, ObjectNode payload) {
