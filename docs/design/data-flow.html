@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>gongsi 데이터 흐름</title>
+<style>
+:root{
+  --ink:#16202c; --muted:#5b6878; --faint:#8a96a6; --line:#d9dfe7; --bg:#ffffff; --panel:#f4f6f9;
+  --accent:#1f5fd1; --accent-soft:#e6eefc; --raw:#8a5a00; --raw-soft:#fdf3e1; --norm:#1d7a4a; --norm-soft:#e3f4ea;
+  --diff:#a3361f; --diff-soft:#fbe9e4; --meta:#5a3fa8; --meta-soft:#eeeafb;
+  --f-xs:13px; --f-sm:15px; --f-md:18px; --f-lg:24px; --f-xl:34px; --f-hero:52px;
+  --gap:16px; --pad:48px; --radius:8px;
+}
+@page{size:1280px 720px;margin:0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.slide{width:1280px;height:720px;padding:var(--pad) var(--pad) 36px;position:relative;overflow:hidden;page-break-after:always;display:flex;flex-direction:column}
+.slide:last-child{page-break-after:auto}
+.kicker{font-size:var(--f-xs);letter-spacing:.12em;color:var(--accent);font-weight:700;text-transform:uppercase}
+h1{font-size:var(--f-hero);margin:12px 0 8px;line-height:1.15}
+h2{font-size:var(--f-xl);margin:6px 0 18px;line-height:1.2}
+h3{font-size:var(--f-md);margin:0 0 8px}
+p,li{font-size:var(--f-sm);line-height:1.55}
+ul{margin:0;padding-left:20px}
+.muted{color:var(--muted)}
+.foot{position:absolute;left:var(--pad);right:var(--pad);bottom:16px;display:flex;justify-content:space-between;font-size:12px;color:var(--faint)}
+code,.mono{font-family:Consolas,"D2Coding",monospace;font-size:.92em}
+.cols{display:grid;gap:var(--gap);flex:1;min-height:0}
+.c2{grid-template-columns:1fr 1fr}.c3{grid-template-columns:repeat(3,1fr)}.c4{grid-template-columns:repeat(4,1fr)}
+.card{background:var(--panel);border-radius:var(--radius);padding:16px 18px;border-top:4px solid var(--line)}
+.card.raw{border-top-color:var(--raw)}.card.norm{border-top-color:var(--norm)}.card.diff{border-top-color:var(--diff)}.card.meta{border-top-color:var(--meta)}.card.acc{border-top-color:var(--accent)}
+table{border-collapse:collapse;width:100%;font-size:var(--f-xs)}
+th,td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:var(--panel);font-weight:700;color:var(--muted)}
+td.j{font-family:Consolas,monospace;color:var(--raw)}
+td.t{font-family:Consolas,monospace;color:var(--norm)}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:700;background:var(--panel)}
+.tag.raw{background:var(--raw-soft);color:var(--raw)}.tag.norm{background:var(--norm-soft);color:var(--norm)}.tag.diff{background:var(--diff-soft);color:var(--diff)}.tag.meta{background:var(--meta-soft);color:var(--meta)}.tag.acc{background:var(--accent-soft);color:var(--accent)}
+.method{font-family:Consolas,monospace;font-size:13px;background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin:4px 0;display:block}
+.method b{color:var(--accent)}
+.step-num{font-size:var(--f-hero);font-weight:800;color:var(--accent-soft);position:absolute;right:var(--pad);top:28px}
+pre{margin:0;font-family:Consolas,monospace;font-size:12.5px;line-height:1.45;background:#0f1722;color:#d6e2f0;border-radius:var(--radius);padding:14px 16px;overflow:hidden}
+pre .k{color:#ffcf7a}pre .s{color:#9fe3b2}pre .c{color:#7d8ea3}
+.note{font-size:var(--f-xs);color:var(--muted);margin-top:8px}
+svg text{font-family:"Malgun Gothic",sans-serif}
+</style>
+</head>
+<body>
+
+<section class="slide" style="background:linear-gradient(135deg,#0f1f3d 0%,#1f5fd1 100%);color:#fff;justify-content:center">
+  <div class="kicker" style="color:#a9c4ff">gongsi · 금감원 금융상품 Open API 일일 수집</div>
+  <h1>데이터는 어디서 와서<br>어디에 쌓이는가</h1>
+  <p style="font-size:var(--f-md);color:#d5e2ff;max-width:820px">dailyCollectJob 4단계(fetch → normalize → diff → notify)의 데이터 흐름, ERD, JSON 필드 ↔ 테이블 컬럼 매핑, 적재 로직과 메서드를 한 번에 본다</p>
+  <div style="display:flex;gap:10px;margin-top:28px">
+    <span class="tag" style="background:#ffffff22;color:#fff">Spring Boot 3 · Java 21</span>
+    <span class="tag" style="background:#ffffff22;color:#fff">Spring Batch 5.1</span>
+    <span class="tag" style="background:#ffffff22;color:#fff">PostgreSQL 16 (RDS 시드니)</span>
+  </div>
+  <div class="foot" style="color:#a9c4ff"><span>junhyeokkk/gongsi · main 기준 · 원본 docs/design/data-flow.html</span><span>2026-11-17</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Overview</div>
+  <h2>전체 그림 — 한 번의 수집이 지나가는 길</h2>
+  <svg viewBox="0 0 1184 470" width="1184" height="470">
+    <defs><marker id="ar" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8a96a6"/></marker></defs>
+    <rect x="0" y="40" width="190" height="120" rx="8" fill="#f4f6f9" stroke="#d9dfe7"/>
+    <text x="95" y="72" text-anchor="middle" font-size="15" font-weight="700" fill="#16202c">금감원 finlife API</text>
+    <text x="95" y="96" text-anchor="middle" font-size="12" fill="#5b6878">상품 5종 + companySearch</text>
+    <text x="95" y="116" text-anchor="middle" font-size="12" fill="#5b6878">× 4권역 × 페이지</text>
+    <text x="95" y="140" text-anchor="middle" font-size="12" fill="#5b6878">JSON 응답</text>
+    <rect x="0" y="230" width="190" height="150" rx="8" fill="#eeeafb" stroke="#5a3fa8"/>
+    <text x="95" y="258" text-anchor="middle" font-size="15" font-weight="700" fill="#5a3fa8">DailyCollectScheduler</text>
+    <text x="95" y="282" text-anchor="middle" font-size="12" fill="#16202c">KST 09:00~17:50 10분마다</text>
+    <text x="95" y="302" text-anchor="middle" font-size="12" fill="#16202c">RetryPolicy.decide</text>
+    <text x="95" y="322" text-anchor="middle" font-size="12" fill="#16202c">(완료 skip · 백오프 10/30/60분)</text>
+    <text x="95" y="346" text-anchor="middle" font-size="12" fill="#16202c">OrphanExecutionCleaner</text>
+    <text x="95" y="364" text-anchor="middle" font-size="12" fill="#16202c">(기동 시 고아 실행 정리)</text>
+    <g font-size="13">
+      <rect x="250" y="40" width="200" height="120" rx="8" fill="#fdf3e1" stroke="#8a5a00"/>
+      <text x="350" y="68" text-anchor="middle" font-weight="700" font-size="15" fill="#8a5a00">① fetchStep</text>
+      <text x="350" y="92" text-anchor="middle" fill="#16202c">FetchService.fetchAll</text>
+      <text x="350" y="112" text-anchor="middle" fill="#16202c">페이지마다 원문 UPSERT</text>
+      <text x="350" y="134" text-anchor="middle" fill="#5b6878">권역 하나라도 빠지면 실패</text>
+      <rect x="490" y="40" width="200" height="120" rx="8" fill="#e3f4ea" stroke="#1d7a4a"/>
+      <text x="590" y="68" text-anchor="middle" font-weight="700" font-size="15" fill="#1d7a4a">② normalizeStep</text>
+      <text x="590" y="92" text-anchor="middle" fill="#16202c">NormalizeService.normalizeAll</text>
+      <text x="590" y="112" text-anchor="middle" fill="#16202c">CompanyNormalizeService</text>
+      <text x="590" y="134" text-anchor="middle" fill="#5b6878">오염 레코드는 격리</text>
+      <rect x="730" y="40" width="200" height="120" rx="8" fill="#fbe9e4" stroke="#a3361f"/>
+      <text x="830" y="68" text-anchor="middle" font-weight="700" font-size="15" fill="#a3361f">③ diffStep</text>
+      <text x="830" y="92" text-anchor="middle" fill="#16202c">RateDiffService.detectChanges</text>
+      <text x="830" y="112" text-anchor="middle" fill="#16202c">직전 수집일 원문과 비교</text>
+      <text x="830" y="134" text-anchor="middle" fill="#5b6878">급변이면 FAILED_NO_RETRY</text>
+      <rect x="970" y="40" width="200" height="120" rx="8" fill="#f4f6f9" stroke="#8a96a6"/>
+      <text x="1070" y="68" text-anchor="middle" font-weight="700" font-size="15" fill="#5b6878">④ notifyStep</text>
+      <text x="1070" y="92" text-anchor="middle" fill="#16202c">현재 로그만 남김</text>
+      <text x="1070" y="112" text-anchor="middle" fill="#16202c">구독 알림은 6주차 TODO</text>
+    </g>
+    <line x1="190" y1="100" x2="248" y2="100" stroke="#8a96a6" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="450" y1="100" x2="488" y2="100" stroke="#8a96a6" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="690" y1="100" x2="728" y2="100" stroke="#8a96a6" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="930" y1="100" x2="968" y2="100" stroke="#8a96a6" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="190" y1="300" x2="248" y2="300" stroke="#5a3fa8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+    <text x="196" y="222" font-size="12" fill="#5a3fa8">jobLauncher.run(targetDate=오늘)</text>
+    <g font-size="12.5">
+      <rect x="250" y="230" width="200" height="150" rx="8" fill="#fff" stroke="#8a5a00" stroke-dasharray="4 3"/>
+      <text x="262" y="296" fill="#8a5a00" font-weight="700">raw_snapshot</text>
+      <text x="262" y="316" fill="#5b6878">JSONB 원문 · 페이지당 1행</text>
+      <rect x="490" y="200" width="200" height="210" rx="8" fill="#fff" stroke="#1d7a4a" stroke-dasharray="4 3"/>
+      <text x="502" y="226" fill="#1d7a4a" font-weight="700">product</text>
+      <text x="502" y="246" fill="#1d7a4a" font-weight="700">product_option</text>
+      <text x="502" y="270" fill="#1d7a4a" font-weight="700">credit_loan_product</text>
+      <text x="502" y="290" fill="#1d7a4a" font-weight="700">credit_loan_option</text>
+      <text x="502" y="314" fill="#1d7a4a" font-weight="700">company</text>
+      <text x="502" y="334" fill="#1d7a4a" font-weight="700">company_area</text>
+      <text x="502" y="364" fill="#5b6878" font-weight="700">normalize_error</text>
+      <text x="502" y="384" fill="#5b6878">(걸러낸 레코드 위치·사유)</text>
+      <rect x="730" y="230" width="200" height="150" rx="8" fill="#fff" stroke="#a3361f" stroke-dasharray="4 3"/>
+      <text x="742" y="268" fill="#a3361f" font-weight="700">rate_history</text>
+      <text x="742" y="288" fill="#a3361f" font-weight="700">credit_rate_history</text>
+      <text x="742" y="318" fill="#a3361f" font-weight="700">change_event</text>
+      <text x="742" y="338" fill="#5b6878">NEW·RATE_UP·RATE_DOWN</text>
+      <text x="742" y="356" fill="#5b6878">CLOSED·OPTION_REMOVED</text>
+      <rect x="970" y="230" width="200" height="150" rx="8" fill="#fff" stroke="#8a96a6" stroke-dasharray="4 3"/>
+      <text x="982" y="268" fill="#5b6878" font-weight="700">alert_subscription</text>
+      <text x="982" y="288" fill="#5b6878" font-weight="700">alert_delivery</text>
+      <text x="982" y="318" fill="#5b6878">(스키마만 있음)</text>
+      <text x="982" y="350" fill="#5a3fa8" font-weight="700">슬랙 운영 알림</text>
+      <text x="982" y="368" fill="#5b6878">완료 요약·실패·정리</text>
+    </g>
+    <line x1="350" y1="160" x2="350" y2="228" stroke="#8a5a00" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="590" y1="160" x2="590" y2="198" stroke="#1d7a4a" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="830" y1="160" x2="830" y2="228" stroke="#a3361f" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="1070" y1="160" x2="1070" y2="228" stroke="#8a96a6" stroke-width="2" marker-end="url(#ar)"/>
+    <path d="M450 345 C600 450 700 450 760 382" stroke="#8a5a00" fill="none" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+    <text x="470" y="445" font-size="12" fill="#8a5a00">normalize 는 오늘 원문을, diff 는 오늘·직전 원문을 다시 읽고 id 만 product 계열에서 가져온다</text>
+  </svg>
+  <div class="foot"><span>모든 테이블은 RDS PostgreSQL 한 DB · 배치 메타(BATCH_*)도 같은 DB</span><span>2</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Storage</div>
+  <h2>데이터는 어디에 저장되나</h2>
+  <div class="cols c4">
+    <div class="card raw"><span class="tag raw">원문 계층</span><h3 style="margin-top:10px">raw_snapshot</h3>
+      <p>API 응답을 손대지 않고 JSONB 로 보관. 날짜·상품군·권역·페이지당 1행</p>
+      <p class="muted">다시 받을 수 없는 날짜의 유일한 원본 → 매일 S3 로 백업(런북 10단계)</p></div>
+    <div class="card norm"><span class="tag norm">정규화 계층</span><h3 style="margin-top:10px">상품 · 옵션 · 회사</h3>
+      <p><code>product</code>/<code>product_option</code> (예금·적금·주담대·전세)<br><code>credit_loan_*</code> (신용대출)<br><code>company</code>/<code>company_area</code></p>
+      <p class="muted">"지금 상태" 테이블. 매일 UPSERT, 사라지면 is_active=false</p></div>
+    <div class="card diff"><span class="tag diff">변동 계층</span><h3 style="margin-top:10px">이력 · 이벤트</h3>
+      <p><code>rate_history</code>, <code>credit_rate_history</code> — 필드별 전후 금리<br><code>change_event</code> — 알림 대상 사건</p>
+      <p class="muted">append-only. 같은 날 재실행해도 ON CONFLICT DO NOTHING 으로 한 번만</p></div>
+    <div class="card meta"><span class="tag meta">운영 계층</span><h3 style="margin-top:10px">배치 메타 · 기타</h3>
+      <p><code>BATCH_JOB_EXECUTION</code>, <code>BATCH_STEP_EXECUTION</code> — 실행 기록(재시도 판단 근거)<br><code>normalize_error</code>, <code>audit_log</code>, <code>alert_*</code></p>
+      <p class="muted">Flyway V1~V3 로 스키마 관리</p></div>
+  </div>
+  <div class="card acc" style="flex:0 0 auto;margin-top:var(--gap)">
+    <h3>인프라</h3>
+    <p style="margin:0">EC2 1대(시드니)에서 앱이 돌고 RDS PostgreSQL 16 에 쓴다. main 머지 → <code>gongsi-update.timer</code> 가 10분 안에 새 jar 로 재기동. 슬랙 Incoming Webhook 으로 운영 알림, 인증키·웹훅은 SSM Parameter Store</p>
+  </div>
+  <div class="foot"><span>docs/runbook/aws-deploy.md · db/migration/V1~V3</span><span>3</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">ERD</div>
+  <h2>ERD — 테이블과 관계</h2>
+  <svg viewBox="0 0 1184 560" width="1184" height="560" font-size="11.5">
+    <defs><marker id="fk" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5b6878"/></marker></defs>
+    <style>.h{font-weight:700;font-size:13px}.pk{fill:#1f5fd1;font-weight:700}.fk{fill:#a3361f}.uk{fill:#1d7a4a}.f{fill:#16202c}.d{fill:#8a96a6}</style>
+    <g transform="translate(0,0)"><rect width="200" height="150" rx="6" fill="#fdf3e1" stroke="#8a5a00"/><rect width="200" height="26" rx="6" fill="#8a5a00"/><text x="10" y="18" class="h" fill="#fff">raw_snapshot</text>
+      <text x="10" y="44" class="pk">id PK</text><text x="10" y="62" class="uk">fetched_on · product_type</text><text x="10" y="78" class="uk">fin_grp_no · page_no  (UK)</text><text x="10" y="98" class="f">payload JSONB</text><text x="10" y="116" class="f">fetched_at</text><text x="10" y="138" class="d">DEP…CRED · COMPANY</text></g>
+    <g transform="translate(0,190)"><rect width="200" height="140" rx="6" fill="#f4f6f9" stroke="#8a96a6"/><rect width="200" height="26" rx="6" fill="#8a96a6"/><text x="10" y="18" class="h" fill="#fff">normalize_error</text>
+      <text x="10" y="44" class="pk">id PK</text><text x="10" y="62" class="fk">raw_snapshot_id FK</text><text x="10" y="80" class="f">fetched_on · product_type</text><text x="10" y="98" class="f">list_kind (BASE/OPTION)</text><text x="10" y="116" class="f">record_index · reason · detail</text></g>
+    <line x1="100" y1="190" x2="100" y2="152" stroke="#5b6878" marker-end="url(#fk)"/>
+    <g transform="translate(260,0)"><rect width="215" height="215" rx="6" fill="#e3f4ea" stroke="#1d7a4a"/><rect width="215" height="26" rx="6" fill="#1d7a4a"/><text x="10" y="18" class="h" fill="#fff">product</text>
+      <text x="10" y="44" class="pk">id PK</text><text x="10" y="62" class="uk">inst_code · product_code</text><text x="10" y="78" class="uk">product_type  (UK)</text><text x="10" y="98" class="f">fin_grp_no · inst_name</text><text x="10" y="116" class="f">product_name · join_*</text><text x="10" y="134" class="f">max_limit · *_note (예적금/대출)</text><text x="10" y="152" class="f">disclosure_month/start/end</text><text x="10" y="170" class="f">submitted_at</text><text x="10" y="188" class="f">is_active · first/last_seen_on</text><text x="10" y="206" class="d">DEP / SAV / MORT / RENT</text></g>
+    <g transform="translate(260,250)"><rect width="215" height="200" rx="6" fill="#e3f4ea" stroke="#1d7a4a"/><rect width="215" height="26" rx="6" fill="#1d7a4a"/><text x="10" y="18" class="h" fill="#fff">product_option</text>
+      <text x="10" y="44" class="pk">id PK</text><text x="10" y="62" class="fk">product_id FK</text><text x="10" y="80" class="uk">option_key  (UK with product_id)</text><text x="10" y="100" class="f">save_term · rate_type</text><text x="10" y="118" class="f">reserve_type · base_rate · max_rate</text><text x="10" y="136" class="f">mortgage_type · repay_type</text><text x="10" y="154" class="f">lend_rate_type · rate_min/max/avg</text><text x="10" y="172" class="f">is_active · last_seen_on</text></g>
+    <line x1="367" y1="250" x2="367" y2="217" stroke="#5b6878" marker-end="url(#fk)"/>
+    <g transform="translate(260,480)"><rect width="215" height="78" rx="6" fill="#fbe9e4" stroke="#a3361f"/><rect width="215" height="24" rx="6" fill="#a3361f"/><text x="10" y="17" class="h" fill="#fff">rate_history</text>
+      <text x="10" y="40" class="fk">product_option_id FK</text><text x="10" y="56" class="uk">changed_on · field (UK)</text><text x="10" y="72" class="f">old_value → new_value</text></g>
+    <line x1="367" y1="480" x2="367" y2="452" stroke="#5b6878" marker-end="url(#fk)"/>
+    <g transform="translate(535,0)"><rect width="215" height="180" rx="6" fill="#e3f4ea" stroke="#1d7a4a"/><rect width="215" height="26" rx="6" fill="#1d7a4a"/><text x="10" y="18" class="h" fill="#fff">credit_loan_product</text>
+      <text x="10" y="44" class="pk">id PK</text><text x="10" y="62" class="uk">inst_code · product_code</text><text x="10" y="78" class="uk">credit_product_type  (UK)</text><text x="10" y="98" class="f">fin_grp_no · inst_name</text><text x="10" y="116" class="f">product_name · join_way · cb_name</text><text x="10" y="134" class="f">disclosure_* · submitted_at</text><text x="10" y="152" class="f">is_active · first/last_seen_on</text><text x="10" y="170" class="d">1 일반 / 2 마이너스 / 3 카드론</text></g>
+    <g transform="translate(535,250)"><rect width="215" height="150" rx="6" fill="#e3f4ea" stroke="#1d7a4a"/><rect width="215" height="26" rx="6" fill="#1d7a4a"/><text x="10" y="18" class="h" fill="#fff">credit_loan_option</text>
+      <text x="10" y="44" class="pk">id PK</text><text x="10" y="62" class="fk">credit_loan_product_id FK</text><text x="10" y="80" class="uk">lend_rate_type  (UK, A/B/C/D)</text><text x="10" y="100" class="f">rate_grade_1,4,5,6,10~13</text><text x="10" y="118" class="f">rate_avg</text><text x="10" y="136" class="f">is_active · last_seen_on</text></g>
+    <line x1="642" y1="250" x2="642" y2="182" stroke="#5b6878" marker-end="url(#fk)"/>
+    <g transform="translate(535,480)"><rect width="215" height="78" rx="6" fill="#fbe9e4" stroke="#a3361f"/><rect width="215" height="24" rx="6" fill="#a3361f"/><text x="10" y="17" class="h" fill="#fff">credit_rate_history</text>
+      <text x="10" y="40" class="fk">credit_loan_option_id FK</text><text x="10" y="56" class="uk">changed_on · field (UK)</text><text x="10" y="72" class="f">old_value → new_value</text></g>
+    <line x1="642" y1="480" x2="642" y2="402" stroke="#5b6878" marker-end="url(#fk)"/>
+    <g transform="translate(810,170)"><rect width="190" height="190" rx="6" fill="#fbe9e4" stroke="#a3361f"/><rect width="190" height="26" rx="6" fill="#a3361f"/><text x="10" y="18" class="h" fill="#fff">change_event</text>
+      <text x="10" y="44" class="pk">id PK</text><text x="10" y="62" class="fk">product_id / product_option_id</text><text x="10" y="80" class="fk">credit_loan_product_id</text><text x="10" y="96" class="fk">credit_loan_option_id</text><text x="10" y="116" class="f">event_type · occurred_on</text><text x="10" y="134" class="f">payload JSONB · consumed_at</text><text x="10" y="156" class="d">CHECK: 상품 계열 XOR 신용</text><text x="10" y="174" class="d">UK: (상품,옵션,유형,날짜)</text></g>
+    <line x1="810" y1="230" x2="477" y2="110" stroke="#5b6878" stroke-dasharray="3 3" marker-end="url(#fk)"/>
+    <line x1="810" y1="250" x2="477" y2="320" stroke="#5b6878" stroke-dasharray="3 3" marker-end="url(#fk)"/>
+    <line x1="810" y1="270" x2="752" y2="110" stroke="#5b6878" stroke-dasharray="3 3" marker-end="url(#fk)"/>
+    <line x1="810" y1="290" x2="752" y2="320" stroke="#5b6878" stroke-dasharray="3 3" marker-end="url(#fk)"/>
+    <g transform="translate(810,400)"><rect width="190" height="120" rx="6" fill="#f4f6f9" stroke="#8a96a6"/><rect width="190" height="24" rx="6" fill="#8a96a6"/><text x="10" y="17" class="h" fill="#fff">alert_delivery</text>
+      <text x="10" y="42" class="fk">subscription_id FK</text><text x="10" y="58" class="fk">change_event_id FK</text><text x="10" y="76" class="f">status · attempt_count</text><text x="10" y="94" class="f">sent_at · last_error</text><text x="10" y="112" class="d">UK (구독, 이벤트)</text></g>
+    <line x1="905" y1="400" x2="905" y2="362" stroke="#5b6878" marker-end="url(#fk)"/>
+    <g transform="translate(1030,400)"><rect width="154" height="120" rx="6" fill="#f4f6f9" stroke="#8a96a6"/><rect width="154" height="24" rx="6" fill="#8a96a6"/><text x="10" y="17" class="h" fill="#fff">alert_subscription</text>
+      <text x="10" y="42" class="pk">id PK</text><text x="10" y="58" class="f">email · product_type</text><text x="10" y="74" class="f">save_term · min_rate</text><text x="10" y="90" class="f">inst_code · event_types</text><text x="10" y="106" class="f">is_active</text></g>
+    <line x1="1030" y1="450" x2="1002" y2="450" stroke="#5b6878" marker-end="url(#fk)"/>
+    <g transform="translate(1030,0)"><rect width="154" height="170" rx="6" fill="#e3f4ea" stroke="#1d7a4a"/><rect width="154" height="26" rx="6" fill="#1d7a4a"/><text x="10" y="18" class="h" fill="#fff">company</text>
+      <text x="10" y="44" class="pk">id PK</text><text x="10" y="62" class="uk">fin_co_no (UK)</text><text x="10" y="80" class="f">fin_grp_no · 회사명</text><text x="10" y="98" class="f">homepage_url · call_tel</text><text x="10" y="116" class="f">disclosure_contact</text><text x="10" y="134" class="f">disclosure_month</text><text x="10" y="152" class="f">is_active · first/last_seen</text></g>
+    <g transform="translate(1030,210)"><rect width="154" height="110" rx="6" fill="#e3f4ea" stroke="#1d7a4a"/><rect width="154" height="26" rx="6" fill="#1d7a4a"/><text x="10" y="18" class="h" fill="#fff">company_area</text>
+      <text x="10" y="44" class="fk">company_id FK</text><text x="10" y="62" class="uk">area_code (UK)</text><text x="10" y="80" class="f">area_name · has_branch</text><text x="10" y="98" class="f">last_seen_on</text></g>
+    <line x1="1107" y1="210" x2="1107" y2="172" stroke="#5b6878" marker-end="url(#fk)"/>
+    <text x="810" y="40" class="d" font-size="12">product.inst_code ↔ company.fin_co_no</text>
+    <text x="810" y="58" class="d" font-size="12">값은 같지만 FK 는 걸지 않음 (논리 관계)</text>
+    <text x="810" y="100" font-size="12" class="pk">파랑 PK</text><text x="870" y="100" font-size="12" class="fk">빨강 FK</text><text x="930" y="100" font-size="12" class="uk">초록 UK(UPSERT 키)</text>
+  </svg>
+  <div class="foot"><span>audit_log 는 독립 테이블(수동 보정 기록용)이라 생략</span><span>4</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Step 1 · fetch</div><div class="step-num">01</div>
+  <h2>fetchStep — API 를 돌며 원문을 그대로 쌓는다</h2>
+  <div class="cols c2">
+    <div>
+      <h3>무엇을 부르나</h3>
+      <table>
+        <tr><th>데이터셋</th><th>API 서비스 (finlifeapi/…json)</th><th>raw_snapshot.product_type</th></tr>
+        <tr><td>정기예금</td><td class="mono">depositProductsSearch</td><td class="t">DEP</td></tr>
+        <tr><td>적금</td><td class="mono">savingProductsSearch</td><td class="t">SAV</td></tr>
+        <tr><td>주택담보대출</td><td class="mono">mortgageLoanProductsSearch</td><td class="t">MORT</td></tr>
+        <tr><td>전세자금대출</td><td class="mono">rentHouseLoanProductsSearch</td><td class="t">RENT</td></tr>
+        <tr><td>신용대출</td><td class="mono">creditLoanProductsSearch</td><td class="t">CRED</td></tr>
+        <tr><td>금융회사</td><td class="mono">companySearch</td><td class="t">COMPANY</td></tr>
+      </table>
+      <p style="margin-top:12px"><b>권역(topFinGrpNo) 4개</b> — <code>020000</code> 은행 · <code>030300</code> 저축은행 · <code>030200</code> 여신전문 · <code>050000</code> 보험 (금융투자는 상품 없음)</p>
+      <p>6 데이터셋 × 4 권역 × <code>max_page_no</code> 까지 페이지 순회</p>
+    </div>
+    <div>
+      <h3>호출 흐름과 메서드</h3>
+      <span class="method"><b>FetchStepConfig</b>.fetchStep → <b>FetchService</b>.fetchAll(targetDate)</span>
+      <span class="method">&nbsp;└ fetchGroup(date, dataset, finGrpNo, fetcher) <span class="muted">— 권역 하나 페이지 순회</span></span>
+      <span class="method">&nbsp;&nbsp;&nbsp;├ <b>FssOpenFinanceClient</b>.fetchPage / fetchCompanyPage</span>
+      <span class="method">&nbsp;&nbsp;&nbsp;├ parseResult(body…) <span class="muted">— err_cd ≠ "000" 이면 실패</span></span>
+      <span class="method">&nbsp;&nbsp;&nbsp;└ <b>RawSnapshotRepository</b>.insertOrUpdate(…)</span>
+      <pre style="margin-top:10px"><span class="k">INSERT INTO</span> raw_snapshot (fetched_on, product_type,
+  fin_grp_no, page_no, payload, fetched_at) <span class="k">VALUES</span> (…)
+<span class="k">ON CONFLICT</span> (fetched_on, product_type, fin_grp_no, page_no)
+<span class="k">DO UPDATE SET</span> payload = EXCLUDED.payload, fetched_at = now()</pre>
+      <ul style="margin-top:10px">
+        <li>페이지마다 바로 커밋 → 중간 실패해도 앞 페이지는 남고, 재실행은 덮어쓰기라 멱등</li>
+        <li>네트워크·5xx 는 재시도, 4xx 는 즉시 실패. 인증키는 로그에서 *** 마스킹</li>
+        <li>실패한 권역이 하나라도 있으면 Step 실패 [빠진 원문을 "상품 소멸"로 오판 방지]</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot"><span>collect/fetch · collect/step/FetchStepConfig</span><span>5</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Raw JSON</div>
+  <h2>원문 JSON 의 생김새 — base 와 option 두 목록</h2>
+  <div class="cols c2">
+<pre>{
+  <span class="s">"result"</span>: {
+    <span class="s">"prdt_div"</span>: <span class="s">"D"</span>,
+    <span class="s">"total_count"</span>: <span class="k">37</span>,
+    <span class="s">"max_page_no"</span>: <span class="k">1</span>,
+    <span class="s">"now_page_no"</span>: <span class="k">1</span>,
+    <span class="s">"err_cd"</span>: <span class="s">"000"</span>,  <span class="c">// 000 아니면 실패</span>
+    <span class="s">"err_msg"</span>: <span class="s">"정상"</span>,
+    <span class="s">"baseList"</span>: [ {          <span class="c">// 상품 1건 = 1행</span>
+      <span class="s">"dcls_month"</span>: <span class="s">"202610"</span>,
+      <span class="s">"fin_co_no"</span>: <span class="s">"0010001"</span>,
+      <span class="s">"fin_prdt_cd"</span>: <span class="s">"WR0001B"</span>,
+      <span class="s">"kor_co_nm"</span>: <span class="s">"우리은행"</span>,
+      <span class="s">"fin_prdt_nm"</span>: <span class="s">"WON플러스예금"</span>,
+      <span class="s">"join_way"</span>: <span class="s">"인터넷,스마트폰"</span>,
+      <span class="s">"max_limit"</span>: <span class="k">null</span>,
+      <span class="s">"dcls_end_day"</span>: <span class="k">null</span>,
+      <span class="s">"fin_co_subm_day"</span>: <span class="s">"202610281200"</span>, …
+    } ],
+    <span class="s">"optionList"</span>: [ {        <span class="c">// 금리 조건 1건 = 1행</span>
+      <span class="s">"fin_co_no"</span>: <span class="s">"0010001"</span>, <span class="s">"fin_prdt_cd"</span>: <span class="s">"WR0001B"</span>,
+      <span class="s">"intr_rate_type"</span>: <span class="s">"S"</span>, <span class="s">"save_trm"</span>: <span class="s">"12"</span>,
+      <span class="s">"intr_rate"</span>: <span class="k">2.75</span>, <span class="s">"intr_rate2"</span>: <span class="k">2.85</span>
+    } ]
+  }
+}</pre>
+    <div>
+      <div class="card raw" style="margin-bottom:var(--gap)"><h3>읽는 법</h3>
+        <ul>
+          <li><code>baseList</code> → 상품 테이블(product / credit_loan_product / company)</li>
+          <li><code>optionList</code> → 옵션 테이블(product_option / credit_loan_option / company_area)</li>
+          <li>옵션은 <code>fin_co_no + fin_prdt_cd</code>(신용은 + <code>crdt_prdt_type</code>)로 부모 base 를 찾는다</li>
+          <li>base 와 옵션이 서로 다른 페이지에 있을 수 있어 하루치 전 페이지를 모은 뒤 짝짓는다</li>
+        </ul></div>
+      <div class="card"><h3>값 정리 규칙 (JsonFields)</h3>
+        <ul>
+          <li>필수 필드 누락·길이 초과 → <code>MISSING_REQUIRED</code> / <code>TYPE_MISMATCH</code></li>
+          <li>허용값 밖 코드(예: rate_type 이 S/M 이 아님) → <code>UNKNOWN_ENUM</code></li>
+          <li>부모 base 없는 옵션 → <code>ORPHAN_OPTION</code></li>
+          <li>날짜 <code>yyyyMMdd</code>, <code>99991231</code> 은 null, 제출일시 <code>yyyyMMddHHmm</code></li>
+          <li>걸린 레코드는 버리지 않고 <code>normalize_error</code> 에 원문 위치와 함께 격리</li>
+        </ul></div>
+    </div>
+  </div>
+  <div class="foot"><span>예시 값은 형식 설명용 · survey/raw 에 실제 원문 픽스처</span><span>6</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Step 2 · normalize</div><div class="step-num">02</div>
+  <h2>normalizeStep — 원문을 "지금 상태" 테이블로</h2>
+  <div class="cols c2">
+    <div>
+      <h3>상품군 하나를 처리하는 순서</h3>
+      <span class="method"><b>NormalizeService</b>.normalizeAll(fetchedOn) <span class="muted">— 5개 상품군, 상품군마다 별도 트랜잭션</span></span>
+      <span class="method">1. <b>RawSnapshotRepository</b>.findByDate(day, type) <span class="muted">— 원문 없으면 실패</span></span>
+      <span class="method">2. <b>NormalizeErrorRecorder</b>.clear(day, type) <span class="muted">— 재실행 대비</span></span>
+      <span class="method">3. <b>RawRecordReader</b>.read(pages, parser, rejects)</span>
+      <span class="method">&nbsp;&nbsp;&nbsp;└ Normalizer.normalizeBase / normalizeOption</span>
+      <span class="method">4. store.upsertProducts(products, day) → 자연키→id 맵</span>
+      <span class="method">5. store.upsertOptions(options, ids, day)</span>
+      <span class="method">6. store.deactivateMissing(day) <span class="muted">— 오늘 없던 것 is_active=false</span></span>
+      <span class="method">+ <b>CompanyNormalizeService</b>.normalize(day) → company · company_area</span>
+    </div>
+    <div>
+      <h3>어떤 파서·저장소가 붙나</h3>
+      <table>
+        <tr><th>상품군</th><th>파서 (Normalizer)</th><th>저장 (store)</th></tr>
+        <tr><td>DEP · SAV</td><td>ProductBaseNormalizer + DepositNormalizer</td><td>ProductUpsertService</td></tr>
+        <tr><td>MORT · RENT</td><td>ProductBaseNormalizer + LoanNormalizer</td><td>ProductUpsertService</td></tr>
+        <tr><td>CRED</td><td>CreditNormalizer</td><td>CreditUpsertService</td></tr>
+        <tr><td>COMPANY</td><td>CompanyNormalizer</td><td>CompanyUpsertService</td></tr>
+      </table>
+      <div class="card norm" style="margin-top:var(--gap)"><h3>UPSERT 규칙 (ADR-0002)</h3>
+        <ul>
+          <li>자연키 충돌 시 갱신: <code>ON CONFLICT (inst_code, product_code, product_type) DO UPDATE</code></li>
+          <li><code>first_seen_on</code> 은 가장 이른 날, <code>last_seen_on</code> 은 가장 늦은 날 → 날짜를 거꾸로 재처리해도 결과 동일</li>
+          <li>옵션 UK = (product_id, option_key) — option_key 는 금리 조건 조합</li>
+          <li>재등장하면 is_active 가 다시 true</li>
+          <li><code>fin_grp_no</code> 는 JSON 이 아니라 호출한 권역에서 채움 (withFinGrpNo)</li>
+        </ul></div>
+    </div>
+  </div>
+  <div class="foot"><span>collect/normalize · parse · store</span><span>7</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Mapping · baseList → product</div>
+  <h2>예금·적금·주담대·전세 base → <code>product</code></h2>
+  <div class="cols c2">
+    <table>
+      <tr><th>JSON 필드</th><th>product 컬럼</th><th>비고</th></tr>
+      <tr><td class="j">fin_co_no</td><td class="t">inst_code</td><td>UK · 필수 7자</td></tr>
+      <tr><td class="j">fin_prdt_cd</td><td class="t">product_code</td><td>UK · 필수</td></tr>
+      <tr><td class="muted">(상품군)</td><td class="t">product_type</td><td>UK · DEP/SAV/MORT/RENT</td></tr>
+      <tr><td class="muted">(호출 권역)</td><td class="t">fin_grp_no</td><td>020000 등</td></tr>
+      <tr><td class="j">kor_co_nm</td><td class="t">inst_name</td><td>필수</td></tr>
+      <tr><td class="j">fin_prdt_nm</td><td class="t">product_name</td><td>필수</td></tr>
+      <tr><td class="j">join_way</td><td class="t">join_way</td><td></td></tr>
+      <tr><td class="j">join_deny</td><td class="t">join_deny</td><td>1 제한없음 / 2 서민 / 3 일부</td></tr>
+      <tr><td class="j">join_member</td><td class="t">join_member</td><td></td></tr>
+      <tr><td class="j">etc_note</td><td class="t">etc_note</td><td></td></tr>
+      <tr><td class="j">dcls_month</td><td class="t">disclosure_month</td><td>필수 yyyyMM</td></tr>
+      <tr><td class="j">dcls_strt_day / dcls_end_day</td><td class="t">disclosure_start/end_date</td><td>99991231 → null</td></tr>
+      <tr><td class="j">fin_co_subm_day</td><td class="t">submitted_at</td><td>yyyyMMddHHmm</td></tr>
+    </table>
+    <div>
+      <table>
+        <tr><th>JSON 필드</th><th>product 컬럼</th><th>상품군</th></tr>
+        <tr><td class="j">max_limit</td><td class="t">max_limit</td><td>예·적금</td></tr>
+        <tr><td class="j">spcl_cnd</td><td class="t">special_condition</td><td>예·적금</td></tr>
+        <tr><td class="j">mtrt_int</td><td class="t">maturity_interest_note</td><td>예·적금</td></tr>
+        <tr><td class="j">loan_lmt</td><td class="t">loan_limit_note</td><td>대출</td></tr>
+        <tr><td class="j">erly_rpay_fee</td><td class="t">early_repayment_fee_note</td><td>대출</td></tr>
+        <tr><td class="j">dly_rate</td><td class="t">delinquency_rate_note</td><td>대출</td></tr>
+        <tr><td class="j">loan_inci_expn</td><td class="t">incidental_expense_note</td><td>대출</td></tr>
+      </table>
+      <div class="card norm" style="margin-top:var(--gap)"><h3>배치가 채우는 컬럼</h3>
+        <ul>
+          <li><code>is_active</code> — 오늘 원문에 있으면 true, 없으면 deactivateMissing 이 false</li>
+          <li><code>first_seen_on</code> / <code>last_seen_on</code> — 처음·마지막으로 본 수집일</li>
+          <li><code>created_at</code> / <code>updated_at</code></li>
+        </ul>
+        <p class="note">메서드: ProductBaseNormalizer.normalizeBase(JsonNode) → NormalizedProduct → ProductUpsertService.upsertProducts</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>collect/normalize/parse/ProductBaseNormalizer</span><span>8</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Mapping · optionList → product_option</div>
+  <h2>금리 옵션 → <code>product_option</code></h2>
+  <div class="cols c2">
+    <div>
+      <h3><span class="tag norm">DEP · SAV</span> DepositNormalizer.normalizeOption</h3>
+      <table>
+        <tr><th>JSON 필드</th><th>컬럼</th><th>비고</th></tr>
+        <tr><td class="j">save_trm</td><td class="t">save_term</td><td>필수 · 개월</td></tr>
+        <tr><td class="j">intr_rate_type</td><td class="t">rate_type</td><td>S 단리 / M 복리</td></tr>
+        <tr><td class="j">rsrv_type</td><td class="t">reserve_type</td><td>S 정액 / F 자유 (적금만)</td></tr>
+        <tr><td class="j">intr_rate</td><td class="t">base_rate</td><td>기본금리</td></tr>
+        <tr><td class="j">intr_rate2</td><td class="t">max_rate</td><td>최고우대금리</td></tr>
+      </table>
+      <p class="note"><b>option_key</b> = <code>save_trm|intr_rate_type</code> (적금은 <code>|rsrv_type</code> 추가) 예) <code>12|S</code>, <code>12|S|F</code></p>
+    </div>
+    <div>
+      <h3><span class="tag norm">MORT · RENT</span> LoanNormalizer.normalizeOption</h3>
+      <table>
+        <tr><th>JSON 필드</th><th>컬럼</th><th>비고</th></tr>
+        <tr><td class="j">mrtg_type</td><td class="t">mortgage_type</td><td>A 아파트 / E 아파트외 (주담대만)</td></tr>
+        <tr><td class="j">rpay_type</td><td class="t">repay_type</td><td>D 분할 / S 만기일시</td></tr>
+        <tr><td class="j">lend_rate_type</td><td class="t">lend_rate_type</td><td>F 고정 / C 변동</td></tr>
+        <tr><td class="j">lend_rate_min</td><td class="t">rate_min</td><td></td></tr>
+        <tr><td class="j">lend_rate_max</td><td class="t">rate_max</td><td></td></tr>
+        <tr><td class="j">lend_rate_avg</td><td class="t">rate_avg</td><td>변동 감지 제외</td></tr>
+      </table>
+      <p class="note"><b>option_key</b> = <code>mrtg_type|rpay_type|lend_rate_type</code> (전세는 앞 하나 없음) 예) <code>A|D|F</code>, <code>D|C</code></p>
+    </div>
+  </div>
+  <div class="card norm" style="flex:0 0 auto;margin-top:var(--gap)">
+    <p style="margin:0">공통: 옵션의 <code>fin_co_no + fin_prdt_cd</code> 로 부모 상품 id 를 찾아 <code>product_id</code> 에 넣는다 → <code>ON CONFLICT (product_id, option_key) DO UPDATE</code>, 오늘 없던 옵션은 is_active=false. 옵션은 상품 하나에 여러 개(기간·금리유형·상환방식별)</p>
+  </div>
+  <div class="foot"><span>collect/normalize/parse/DepositNormalizer · LoanNormalizer</span><span>9</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Mapping · 신용대출 · 금융회사</div>
+  <h2>신용대출 → <code>credit_loan_*</code>, 금융회사 → <code>company*</code></h2>
+  <div class="cols c2">
+    <div>
+      <h3><span class="tag norm">CRED</span> CreditNormalizer</h3>
+      <table>
+        <tr><th>JSON 필드</th><th>컬럼</th><th>비고</th></tr>
+        <tr><td class="j">fin_co_no · fin_prdt_cd</td><td class="t">inst_code · product_code</td><td>UK</td></tr>
+        <tr><td class="j">crdt_prdt_type</td><td class="t">credit_product_type</td><td>UK · 1 일반/2 마이너스/3 카드론</td></tr>
+        <tr><td class="j">kor_co_nm · fin_prdt_nm</td><td class="t">inst_name · product_name</td><td></td></tr>
+        <tr><td class="j">join_way · cb_name</td><td class="t">join_way · cb_name</td><td>KCB / NICE</td></tr>
+        <tr><td class="j">dcls_* · fin_co_subm_day</td><td class="t">disclosure_* · submitted_at</td><td>product 와 동일 규칙</td></tr>
+        <tr><th colspan="3">optionList → credit_loan_option</th></tr>
+        <tr><td class="j">crdt_lend_rate_type</td><td class="t">lend_rate_type</td><td>UK · A 대출/B 기준/C 가산/D 가감조정</td></tr>
+        <tr><td class="j">crdt_grad_1,4,5,6,10~13</td><td class="t">rate_grade_N</td><td>신용등급 구간별 금리</td></tr>
+        <tr><td class="j">crdt_grad_avg</td><td class="t">rate_avg</td><td></td></tr>
+      </table>
+      <p class="note">option_key = lend_rate_type · 저장: CreditUpsertService.upsertProducts / upsertOptions / deactivateMissing</p>
+    </div>
+    <div>
+      <h3><span class="tag norm">COMPANY</span> CompanyNormalizer</h3>
+      <table>
+        <tr><th>JSON 필드</th><th>컬럼</th><th>비고</th></tr>
+        <tr><td class="j">fin_co_no</td><td class="t">fin_co_no</td><td>UK</td></tr>
+        <tr><td class="muted">(호출 권역)</td><td class="t">fin_grp_no</td><td></td></tr>
+        <tr><td class="j">kor_co_nm</td><td class="t">company_name</td><td>필수</td></tr>
+        <tr><td class="j">homp_url</td><td class="t">homepage_url</td><td></td></tr>
+        <tr><td class="j">cal_tel</td><td class="t">call_tel</td><td>콜센터</td></tr>
+        <tr><td class="j">dcls_chrg_man</td><td class="t">disclosure_contact</td><td>공시 담당 자유 서술</td></tr>
+        <tr><td class="j">dcls_month</td><td class="t">disclosure_month</td><td>필수</td></tr>
+        <tr><th colspan="3">optionList → company_area</th></tr>
+        <tr><td class="j">area_cd</td><td class="t">area_code</td><td>UK · 01 서울 … 17 제주</td></tr>
+        <tr><td class="j">area_nm</td><td class="t">area_name</td><td></td></tr>
+        <tr><td class="j">exis_yn</td><td class="t">has_branch</td><td>Y → true</td></tr>
+      </table>
+      <p class="note">저장: CompanyUpsertService.upsertCompanies / upsertAreas / deactivateMissing (한 트랜잭션)</p>
+    </div>
+  </div>
+  <div class="foot"><span>collect/normalize/parse/CreditNormalizer · CompanyNormalizer</span><span>10</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Step 3 · diff</div><div class="step-num">03</div>
+  <h2>diffStep — 어제와 비교해 무엇이 바뀌었나</h2>
+  <div class="cols c2">
+    <div>
+      <h3>흐름 (전 상품군 한 트랜잭션, ADR-0003)</h3>
+      <span class="method"><b>RateDiffService</b>.detectChanges(targetDate)</span>
+      <span class="method">1. RawSnapshotRepository.latestDatesBefore(type, date) <span class="muted">— 권역별 직전 수집일</span></span>
+      <span class="method">2. <b>RawRateReader</b>.read(parser, pages) ×2 <span class="muted">— 오늘·직전 원문을 상품→옵션키→옵션으로</span></span>
+      <span class="method">3. <b>RateDiffCalculator</b>.compare(prev, today, …)</span>
+      <span class="method">4. checkNotPartial(…) <span class="muted">— 급변이면 MassChangeException</span></span>
+      <span class="method">5. <b>ProductIdRepository</b>.load(type) / loadCredit() <span class="muted">— 자연키→id</span></span>
+      <span class="method">6. <b>RateHistoryRepository</b>.insertAll(family, date, rows)</span>
+      <span class="method">7. <b>ChangeEventPublisher</b>.publish(family, date, events)</span>
+      <ul style="margin-top:10px">
+        <li>직전 원문이 없는 권역(첫 수집)은 비교하지 않음 [전부 NEW 폭주 방지]</li>
+        <li>원문을 다시 읽는 이유: normalize 테이블은 "오늘 상태"만 있어 어제 값이 없다</li>
+      </ul>
+    </div>
+    <div>
+      <table>
+        <tr><th>판정</th><th>남는 것</th></tr>
+        <tr><td>금리 필드 값이 바뀜</td><td><code>rate_history</code> 필드별 1행 + <span class="tag diff">RATE_UP</span>/<span class="tag diff">RATE_DOWN</span> 이벤트</td></tr>
+        <tr><td>상품이 새로 생김</td><td><span class="tag diff">NEW</span> (상품 단위)</td></tr>
+        <tr><td>상품이 사라짐</td><td><span class="tag diff">CLOSED</span></td></tr>
+        <tr><td>옵션만 사라짐</td><td><span class="tag diff">OPTION_REMOVED</span></td></tr>
+        <tr><td>새 옵션 / 옵션 소멸</td><td>이력에 old 또는 new 가 null</td></tr>
+      </table>
+      <p class="note">비교 필드 — 상품: base_rate · max_rate · rate_min · rate_max (rate_avg 제외) / 신용: rate_grade_1…13 · rate_avg. 2.5 와 2.50 은 같은 값</p>
+      <div class="card diff" style="margin-top:12px"><h3>급변 차단</h3>
+        <p style="margin:0">한 상품군에서 하루에 사라지거나 생긴 상품이 <b>max(5개, 10%)</b> 를 넘으면 한쪽 원문이 일부만 받힌 것으로 보고 Step 실패 → 종료 코드 <code>FAILED_NO_RETRY</code>, 자동 재시도 안 함 · 슬랙 "원문 확인 필요"</p></div>
+      <p class="note">두 쓰기 모두 UK 충돌 시 DO NOTHING → 같은 날 재실행해도 한 번만 기록</p>
+    </div>
+  </div>
+  <div class="foot"><span>collect/diff</span><span>11</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Step 4 · notify / 운영</div><div class="step-num">04</div>
+  <h2>notify 와 실행 관리</h2>
+  <div class="cols c3">
+    <div class="card"><h3>notifyStep (현재)</h3>
+      <p>로그 한 줄만 남기는 자리. 구독자 알림은 6주차 예정</p>
+      <ul><li><b>ChangeEventConsumer</b>: <code>consumed_at IS NULL</code> 이벤트 폴링 → 구독 매칭</li>
+      <li><b>AlertDispatcher</b>: <code>alert_delivery</code> 에 PENDING→SENT/FAILED, 3회까지 재시도</li></ul></div>
+    <div class="card meta"><h3>스케줄·재시도</h3>
+      <ul>
+        <li><b>DailyCollectScheduler</b>.launch — 10분마다 오늘 실행 기록 확인</li>
+        <li><b>JobExplorerAttemptHistory</b>.of(date) — BATCH_* 테이블에서 시도 목록</li>
+        <li><b>RetryPolicy</b>.decide — RUN / DONE / RUNNING / NO_RETRY / WAIT</li>
+        <li>실패 후 10 → 30 → 60분 대기, 같은 targetDate 로 띄우면 실패한 Step 부터 재개</li>
+        <li><b>OrphanExecutionCleaner</b> — 재기동으로 STARTED 에 남은 실행을 기동 시 FAILED 로 정리</li>
+      </ul></div>
+    <div class="card acc"><h3>슬랙 운영 알림</h3>
+      <ul>
+        <li><b>CollectAlertMessages</b> 가 문구, <b>SlackCollectAlert</b> 가 웹훅 발송</li>
+        <li>완료 요약: <b>JdbcCollectSummaryReader</b> 가 원문 페이지·권역, 판매 중 상품, 신규·종료, 금리 인상·인하, 정규화 오류 수를 집계</li>
+        <li>실패(단계·사유·다음 재시도), 복구, 중단, 마감, 고아 정리</li>
+      </ul></div>
+  </div>
+  <div class="foot"><span>collect/job · collect/notify</span><span>12</span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Summary</div>
+  <h2>한 장 요약 — 재실행해도 안전한 이유</h2>
+  <table style="font-size:14px">
+    <tr><th style="width:150px">단계</th><th>읽는 곳</th><th>쓰는 곳</th><th>멱등 장치</th><th>실패 시</th></tr>
+    <tr><td><span class="tag raw">fetch</span></td><td>finlife API</td><td>raw_snapshot</td><td>UK(날짜·상품군·권역·페이지) UPSERT</td><td>권역 누락 → Step 실패 → 백오프 재시도</td></tr>
+    <tr><td><span class="tag norm">normalize</span></td><td>raw_snapshot</td><td>product · product_option · credit_loan_* · company · company_area · normalize_error</td><td>자연키 UPSERT, seen 날짜 최소·최대 유지, 오류는 그날 지우고 다시 기록</td><td>레코드 오류는 격리하고 계속 · 원문 없으면 실패</td></tr>
+    <tr><td><span class="tag diff">diff</span></td><td>raw_snapshot(오늘·직전) + 상품 id</td><td>rate_history · credit_rate_history · change_event</td><td>UK 충돌 DO NOTHING</td><td>급변 → FAILED_NO_RETRY (수동 확인)</td></tr>
+    <tr><td><span class="tag">notify</span></td><td>—</td><td>— (예정: alert_delivery)</td><td>예정: uk_alert_delivery</td><td>—</td></tr>
+    <tr><td><span class="tag meta">job</span></td><td>BATCH_* 메타</td><td>BATCH_* 메타</td><td>targetDate 하나가 식별 파라미터 = 하루 한 JobInstance</td><td>실패 Step 부터 재개, 고아는 기동 시 정리</td></tr>
+  </table>
+  <div class="cols c3" style="margin-top:var(--gap);flex:0 0 auto">
+    <div class="card raw"><p style="margin:0"><b>원문이 정본</b> — 정규화·이력은 원문에서 언제든 다시 만들 수 있다 (ADR-0001)</p></div>
+    <div class="card norm"><p style="margin:0"><b>상태와 이력 분리</b> — product 계열은 오늘 상태, 변화는 history·event 에만</p></div>
+    <div class="card diff"><p style="margin:0"><b>거짓 알림보다 멈춤</b> — 의심스러우면 실패시키고 사람에게 넘긴다</p></div>
+  </div>
+  <div class="foot"><span>자세한 설계: docs/design/data-model.md · docs/adr</span><span>13</span></div>
+</section>
+
+</body>
+</html>
