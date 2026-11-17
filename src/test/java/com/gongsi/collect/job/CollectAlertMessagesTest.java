@@ -74,4 +74,12 @@ class CollectAlertMessagesTest {
         assertThat(CollectAlertMessages.launchFailed(DAY, new IllegalStateException("restart blocked")))
                 .isEqualTo(":x: *gongsi 수집 실행 못 함* · 2026-11-17\n• *사유*  restart blocked");
     }
+
+    @Test
+    void 고아_실행_정리() {
+        assertThat(CollectAlertMessages.orphanCleaned(DAY, 42L, "diffStep")).isEqualTo("""
+                :recycle: *gongsi 중단된 수집 정리* · 2026-11-17 (재기동)
+                • *실행*  #42 diffStep 에서 끊김
+                • *조치*  FAILED 로 정리 - 백오프 뒤 그 단계부터 자동 재시도""");
+    }
 }

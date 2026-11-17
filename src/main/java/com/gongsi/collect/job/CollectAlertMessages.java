@@ -60,9 +60,16 @@ public final class CollectAlertMessages {
         return title(":x:", "수집 실행 못 함", targetDate, null) + "\n" + item("사유", nvl(e.getMessage(), "없음"));
     }
 
+    // 재기동으로 끊긴 실행을 FAILED 로 정리했을 때 (step null 이면 Step 시작 전)
+    public static String orphanCleaned(LocalDate targetDate, Long executionId, String step) {
+        return title(":recycle:", "중단된 수집 정리", targetDate, "재기동") + "\n"
+                + item("실행", "#" + executionId + " " + nvl(step, "Step 시작 전") + " 에서 끊김") + "\n"
+                + item("조치", "FAILED 로 정리 - 백오프 뒤 그 단계부터 자동 재시도");
+    }
+
     // 예) :warning: *gongsi 수집 실패* · 2026-11-17 (1회째)
     private static String title(String emoji, String what, LocalDate targetDate, String note) {
-        List<String> parts = new ArrayList<>(List.of(emoji, "*gongsi " + what + "*", "·", targetDate.toString()));
+        List<String> parts = new ArrayList<>(List.of(emoji, "*gongsi " + what + "*", "·", String.valueOf(targetDate)));
         if (note != null) {
             parts.add("(" + note + ")");
         }
