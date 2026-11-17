@@ -1,6 +1,6 @@
 # AWS 배포 런북 — EC2 + RDS (시드니)
 
-수집 서버를 EC2 1대에 상시 띄우고, 매일 KST 09:00(실패 시 15:00 재시도)에 `dailyCollectJob` 을 돌린다.
+수집 서버를 EC2 1대에 상시 띄우고, 매일 KST 09:00(실패 시 17:50 까지 백오프 재시도, 슬랙 알림)에 `dailyCollectJob` 을 돌린다.
 결정 배경은 [ADR-0006](../adr/0006-ec2-rds-hosting.md).
 
 ```
@@ -100,7 +100,7 @@ curl -sS -A 'Java/21' 'https://finlife.fss.or.kr/finlifeapi/depositProductsSearc
 
 ## 6. SSM Parameter Store
 
-표준 계층으로 다섯 개. 이름 끝부분이 환경변수 이름이 된다 ([run.sh](../../deploy/ec2/run.sh)).
+표준 계층으로 여섯 개. 이름 끝부분이 환경변수 이름이 된다 ([run.sh](../../deploy/ec2/run.sh)).
 
 | 이름 | 유형 | 값 |
 |---|---|---|
@@ -109,6 +109,9 @@ curl -sS -A 'Java/21' 'https://finlife.fss.or.kr/finlifeapi/depositProductsSearc
 | `/gongsi/DB_HOST` | String | RDS 엔드포인트 (호스트 이름만) |
 | `/gongsi/DB_USER` | String | `gongsi` |
 | `/gongsi/DB_NAME` | String | `gongsi` |
+| `/gongsi/ALERT_SLACK_WEBHOOK_URL` | SecureString | 슬랙 Incoming Webhook URL (없으면 알림을 로그로만 남김) |
+
+run.sh 는 기동할 때만 읽으므로 값을 바꾸면 `sudo systemctl restart gongsi`.
 
 ## 7. 첫 배포
 
@@ -166,12 +169,21 @@ psql -v d=2026-10-30 -f fingerprint.sql                              # 로컬과
 
 ## 9. 매일 실행 확인
 
+스케줄러는 KST 09:00~17:50 10분마다 깨어나 오늘 실행 기록(배치 메타 테이블)을 보고 판단한다.
+
+- 완료됐으면 건너뛰고, 실패하면 마지막 종료 뒤 10분 → 30분 → 60분(이후 60분마다) 기다려 실패한 Step 부터 다시 돈다
+- diffStep 이 상품 급변(원문 누락 의심)으로 멈추면 종료 코드 `FAILED_NO_RETRY` 로 남고 재시도하지 않는다
+- 슬랙 알림: 실패(단계·사유·다음 재시도 시각), 실패 뒤 복구, 급변 "원문 확인 필요", 오늘 자동 재시도 끝 "수동 실행 필요"
+
 ```bash
 sudo journalctl -u gongsi --since today --no-pager | grep dailyCollectJob
 psql -c "SELECT fetched_on, count(*) FROM raw_snapshot GROUP BY 1 ORDER BY 1"
+psql -c "SELECT e.job_execution_id, e.status, s.step_name, s.exit_code, e.end_time
+         FROM batch_job_execution e JOIN batch_step_execution s USING (job_execution_id)
+         WHERE s.status <> 'COMPLETED' ORDER BY 1 DESC LIMIT 10"
 ```
 
-15:00 재시도까지 실패하면 서버에서 수동 실행:
+"수동 실행 필요" 알림을 받았거나 급변 원문을 확인한 뒤 서버에서 수동 실행:
 
 ```bash
 sudo systemctl stop gongsi
