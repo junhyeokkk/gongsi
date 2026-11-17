@@ -34,26 +34,29 @@ public class DailyCollectScheduler {
     private final Job dailyCollectJob;
     private final AttemptHistory history;
     private final CollectAlert alert;
+    private final CollectSummaryReader summaryReader;
     private final CronExpression cron;
     private final Clock clock;
 
     @Autowired
     public DailyCollectScheduler(JobLauncher jobLauncher, Job dailyCollectJob, AttemptHistory history,
-                                 CollectAlert alert, @Value("${collect.schedule.cron}") String cron) {
-        this(jobLauncher, dailyCollectJob, history, alert, cron, Clock.systemUTC());
+                                 CollectAlert alert, CollectSummaryReader summaryReader,
+                                 @Value("${collect.schedule.cron}") String cron) {
+        this(jobLauncher, dailyCollectJob, history, alert, summaryReader, cron, Clock.systemUTC());
     }
 
     DailyCollectScheduler(JobLauncher jobLauncher, Job dailyCollectJob, AttemptHistory history,
-                          CollectAlert alert, String cron, Clock clock) {
+                          CollectAlert alert, CollectSummaryReader summaryReader, String cron, Clock clock) {
         this.jobLauncher = jobLauncher;
         this.dailyCollectJob = dailyCollectJob;
         this.history = history;
         this.alert = alert;
+        this.summaryReader = summaryReader;
         this.cron = CronExpression.parse(cron);
         this.clock = clock;
     }
 
-    // 1. 오늘 실행 기록으로 판단  2. 실행  3. 결과 알림 (실패·복구·마감)
+    // 1. 오늘 실행 기록으로 판단  2. 실행  3. 결과 알림 (완료 요약·실패·복구·마감)
     @Scheduled(cron = "${collect.schedule.cron}", zone = ZONE)
     public void launch() {
         Instant now = clock.instant();
@@ -73,7 +76,19 @@ public class DailyCollectScheduler {
         }
         List<CollectAttempt> after = history.of(today);
         log.info("dailyCollectJob 종료 targetDate={} result={}", today, after.isEmpty() ? null : after.get(after.size() - 1));
-        CollectAlertMessages.afterRun(today, after, RetryPolicy.nextRun(after, cron, today, SEOUL).orElse(null))
+        boolean completed = !after.isEmpty() && after.get(after.size() - 1).completed();
+        CollectAlertMessages.afterRun(today, after, RetryPolicy.nextRun(after, cron, today, SEOUL).orElse(null),
+                        completed ? summaryOf(today) : null)
                 .ifPresent(alert::send);
+    }
+
+    // 요약 조회 실패는 warn 만 [완료 알림은 그대로 보낸다]
+    private CollectSummary summaryOf(LocalDate targetDate) {
+        try {
+            return summaryReader.read(targetDate);
+        } catch (RuntimeException e) {
+            log.warn("수집 요약 조회 실패 targetDate={}", targetDate, e);
+            return null;
+        }
     }
 }

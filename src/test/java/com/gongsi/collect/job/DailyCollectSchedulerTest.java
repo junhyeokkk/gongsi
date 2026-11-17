@@ -23,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DailyCollectSchedulerTest {
 
     private static final String CRON = "0 */10 9-17 * * *";
+    private static final CollectSummary SUMMARY = new CollectSummary(29, 4, 1057, 0, 0, 89, 6, 0);
 
     // 스케줄러는 Job 을 넘기기만 하므로 실행되지 않는 빈 Job 으로 충분
     private final Job job = new Job() {
@@ -50,7 +51,7 @@ class DailyCollectSchedulerTest {
     }
 
     private DailyCollectScheduler scheduler(JobLauncher launcher, Instant now) {
-        return new DailyCollectScheduler(launcher, job, d -> List.copyOf(attempts), alerts::add, CRON,
+        return new DailyCollectScheduler(launcher, job, d -> List.copyOf(attempts), alerts::add, d -> SUMMARY, CRON,
                 Clock.fixed(now, ZoneOffset.UTC));
     }
 
@@ -64,7 +65,7 @@ class DailyCollectSchedulerTest {
         assertThat(launched).singleElement()
                 .extracting(p -> p.getString("targetDate"))
                 .isEqualTo("2026-10-31");
-        assertThat(alerts).isEmpty();
+        assertThat(alerts).singleElement().asString().startsWith(":white_check_mark: *gongsi 수집 완료* · 2026-10-31\n• *원문*  29페이지");
     }
 
     @Test
@@ -81,7 +82,7 @@ class DailyCollectSchedulerTest {
     void 실패하면_다음_재시도_시각을_알린다() {
         scheduler(launcherAppending(failed(kst(9, 5))), kst(9, 0)).launch();
 
-        assertThat(alerts).singleElement().asString().contains("수집 실패 1회째 (fetchStep)", "다음 재시도 09:20");
+        assertThat(alerts).singleElement().asString().contains("*gongsi 수집 실패* · 2026-11-17 (1회째)", "• *단계*  fetchStep", "• *다음*  09:20 재시도");
     }
 
     @Test
@@ -91,7 +92,20 @@ class DailyCollectSchedulerTest {
 
         scheduler(launcherAppending(done), kst(9, 20)).launch();
 
-        assertThat(alerts).containsExactly("[gongsi] 2026-11-17 수집 복구 - 실패 1회 뒤 완료");
+        assertThat(alerts).singleElement().asString().startsWith(":large_green_circle: *gongsi 수집 복구* · 2026-11-17 (실패 1회 뒤 완료)\n• *원문*");
+    }
+
+    @Test
+    void 요약_조회가_실패해도_완료를_알린다() {
+        var done = new CollectAttempt(BatchStatus.COMPLETED, kst(9, 1), null, "COMPLETED", null);
+        CollectSummaryReader broken = d -> {
+            throw new IllegalStateException("db down");
+        };
+
+        new DailyCollectScheduler(launcherAppending(done), job, d -> List.copyOf(attempts), alerts::add, broken, CRON,
+                Clock.fixed(kst(9, 0), ZoneOffset.UTC)).launch();
+
+        assertThat(alerts).containsExactly(":white_check_mark: *gongsi 수집 완료* · 2026-11-17");
     }
 
     @Test
@@ -113,6 +127,7 @@ class DailyCollectSchedulerTest {
                 .withBean("dailyCollectJob", Job.class, () -> job)
                 .withBean(AttemptHistory.class, () -> d -> List.of())
                 .withBean(CollectAlert.class, () -> text -> { })
+                .withBean(CollectSummaryReader.class, () -> d -> SUMMARY)
                 .withUserConfiguration(DailyCollectScheduler.class)
                 .withPropertyValues("collect.schedule.cron=" + CRON);
 
