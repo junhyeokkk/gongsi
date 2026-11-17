@@ -43,6 +43,9 @@ pre{margin:0;font-family:Consolas,monospace;font-size:12.5px;line-height:1.45;ba
 pre .k{color:#ffcf7a}pre .s{color:#9fe3b2}pre .c{color:#7d8ea3}
 .note{font-size:var(--f-xs);color:var(--muted);margin-top:8px}
 svg text{font-family:"Malgun Gothic",sans-serif}
+.dict table{font-size:12px}.dict td,.dict th{padding:3px 6px}.dict h3{font-size:15px;margin:0 0 6px}.dict{margin-bottom:14px}
+td.ty{font-family:Consolas,monospace;color:var(--muted);font-size:11px}
+body{counter-reset:pg}.slide{counter-increment:pg}.pg::before{content:counter(pg)}
 </style>
 </head>
 <body>
@@ -136,7 +139,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
     <path d="M450 345 C600 450 700 450 760 382" stroke="#8a5a00" fill="none" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#ar)"/>
     <text x="470" y="445" font-size="12" fill="#8a5a00">normalize 는 오늘 원문을, diff 는 오늘·직전 원문을 다시 읽고 id 만 product 계열에서 가져온다</text>
   </svg>
-  <div class="foot"><span>모든 테이블은 RDS PostgreSQL 한 DB · 배치 메타(BATCH_*)도 같은 DB</span><span>2</span></div>
+  <div class="foot"><span>모든 테이블은 RDS PostgreSQL 한 DB · 배치 메타(BATCH_*)도 같은 DB</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -160,7 +163,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
     <h3>인프라</h3>
     <p style="margin:0">EC2 1대(시드니)에서 앱이 돌고 RDS PostgreSQL 16 에 쓴다. main 머지 → <code>gongsi-update.timer</code> 가 10분 안에 새 jar 로 재기동. 슬랙 Incoming Webhook 으로 운영 알림, 인증키·웹훅은 SSM Parameter Store</p>
   </div>
-  <div class="foot"><span>docs/runbook/aws-deploy.md · db/migration/V1~V3</span><span>3</span></div>
+  <div class="foot"><span>docs/runbook/aws-deploy.md · db/migration/V1~V3</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -211,7 +214,49 @@ svg text{font-family:"Malgun Gothic",sans-serif}
     <text x="810" y="58" class="d" font-size="12">값은 같지만 FK 는 걸지 않음 (논리 관계)</text>
     <text x="810" y="100" font-size="12" class="pk">파랑 PK</text><text x="870" y="100" font-size="12" class="fk">빨강 FK</text><text x="930" y="100" font-size="12" class="uk">초록 UK(UPSERT 키)</text>
   </svg>
-  <div class="foot"><span>audit_log 는 독립 테이블(수동 보정 기록용)이라 생략</span><span>4</span></div>
+  <div class="foot"><span>audit_log 는 독립 테이블(수동 보정 기록용)이라 생략</span><span class="pg"></span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Column Dictionary</div>
+  <h2>컬럼 사전 — 원문 · 오류</h2>
+  <div class="cols c2" style="align-items:start"><div><div class="dict"><h3><span class="tag raw">raw_snapshot</span> <span class="muted" style="font-size:12px;font-weight:400">API 응답 원문 — 날짜·상품군·권역·페이지당 1행</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>행 id (normalize_error 가 가리킴)</td></tr><tr><td class="t">fetched_on</td><td class="ty">DATE</td><td>어느 날짜 수집분인지 (targetDate)</td></tr><tr><td class="t">product_type</td><td class="ty">VARCHAR(8)</td><td>DEP 예금 · SAV 적금 · MORT 주담대 · RENT 전세 · CRED 신용 · COMPANY 금융회사</td></tr><tr><td class="t">fin_grp_no</td><td class="ty">VARCHAR(6)</td><td>권역 020000 은행 · 030300 저축은행 · 030200 여신 · 050000 보험</td></tr><tr><td class="t">page_no</td><td class="ty">SMALLINT</td><td>API 페이지 번호</td></tr><tr><td class="t">payload</td><td class="ty">JSONB</td><td>응답 원문 그대로 (result.baseList / optionList)</td></tr><tr><td class="t">fetched_at</td><td class="ty">TIMESTAMPTZ</td><td>실제로 받은 시각 (재수집하면 갱신)</td></tr><tr><td class="t">UK</td><td class="ty"></td><td>(fetched_on, product_type, fin_grp_no, page_no) — UPSERT 키</td></tr></table></div></div><div><div class="dict"><h3><span class="tag meta">normalize_error</span> <span class="muted" style="font-size:12px;font-weight:400">정규화에서 걸러낸 레코드 — 원문 위치와 사유</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>행 id</td></tr><tr><td class="t">fetched_on</td><td class="ty">DATE</td><td>수집일</td></tr><tr><td class="t">product_type</td><td class="ty">VARCHAR(8)</td><td>상품군 코드 또는 COMPANY</td></tr><tr><td class="t">raw_snapshot_id</td><td class="ty">BIGINT FK</td><td>문제 레코드가 든 원문 페이지</td></tr><tr><td class="t">list_kind</td><td class="ty">VARCHAR(8)</td><td>BASE (상품) / OPTION (금리 옵션)</td></tr><tr><td class="t">record_index</td><td class="ty">INT</td><td>그 페이지 배열 안 위치</td></tr><tr><td class="t">reason</td><td class="ty">VARCHAR(32)</td><td>MISSING_REQUIRED · TYPE_MISMATCH · UNKNOWN_ENUM · ORPHAN_OPTION</td></tr><tr><td class="t">detail</td><td class="ty">TEXT</td><td>필드명·자연키 등 찾기용 설명</td></tr><tr><td class="t">created_at</td><td class="ty">TIMESTAMPTZ</td><td>행 생성 시각</td></tr></table></div></div></div>
+  <div class="foot"><span>db/migration/V1~V3 기준 · UK = UPSERT·중복 방지 키</span><span class="pg"></span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Column Dictionary</div>
+  <h2>컬럼 사전 — 예금·적금·대출 상품</h2>
+  <div class="cols c2" style="align-items:start"><div><div class="dict"><h3><span class="tag norm">product</span> <span class="muted" style="font-size:12px;font-weight:400">예금·적금·주담대·전세 상품의 현재 상태 — 상품 1건 = 1행</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>상품 id</td></tr><tr><td class="t">inst_code</td><td class="ty">VARCHAR(7)</td><td>금융회사 코드 (fin_co_no) · UK</td></tr><tr><td class="t">product_code</td><td class="ty">VARCHAR(64)</td><td>상품 코드 (fin_prdt_cd) · UK</td></tr><tr><td class="t">product_type</td><td class="ty">VARCHAR(8)</td><td>DEP · SAV · MORT · RENT · UK</td></tr><tr><td class="t">fin_grp_no</td><td class="ty">VARCHAR(6)</td><td>수집한 권역</td></tr><tr><td class="t">inst_name</td><td class="ty">VARCHAR(100)</td><td>금융회사명 (kor_co_nm)</td></tr><tr><td class="t">product_name</td><td class="ty">VARCHAR(200)</td><td>상품명 (fin_prdt_nm)</td></tr><tr><td class="t">join_way</td><td class="ty">VARCHAR(100)</td><td>가입 방법 (영업점·인터넷·스마트폰…)</td></tr><tr><td class="t">join_deny</td><td class="ty">SMALLINT</td><td>가입 제한 1 없음 · 2 서민전용 · 3 일부제한</td></tr><tr><td class="t">join_member</td><td class="ty">TEXT</td><td>가입 대상</td></tr><tr><td class="t">etc_note</td><td class="ty">TEXT</td><td>기타 유의사항</td></tr><tr><td class="t">max_limit</td><td class="ty">BIGINT</td><td>최고 한도(원) — 예·적금</td></tr><tr><td class="t">special_condition</td><td class="ty">TEXT</td><td>우대 조건 (spcl_cnd) — 예·적금</td></tr><tr><td class="t">maturity_interest_note</td><td class="ty">TEXT</td><td>만기 후 이자율 (mtrt_int) — 예·적금</td></tr></table></div></div><div><div class="dict"><h3><span class="tag norm">product</span> <span class="muted" style="font-size:12px;font-weight:400">예금·적금·주담대·전세 상품의 현재 상태 — 상품 1건 = 1행</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">loan_limit_note</td><td class="ty">TEXT</td><td>대출 한도 (loan_lmt) — 대출</td></tr><tr><td class="t">early_repayment_fee_note</td><td class="ty">TEXT</td><td>중도상환 수수료 — 대출</td></tr><tr><td class="t">delinquency_rate_note</td><td class="ty">TEXT</td><td>연체 이자율 — 대출</td></tr><tr><td class="t">incidental_expense_note</td><td class="ty">TEXT</td><td>대출 부대비용 — 대출</td></tr><tr><td class="t">disclosure_month</td><td class="ty">CHAR(6)</td><td>공시 제출월 yyyyMM</td></tr><tr><td class="t">disclosure_start_date</td><td class="ty">DATE</td><td>공시 시작일</td></tr><tr><td class="t">disclosure_end_date</td><td class="ty">DATE</td><td>공시 종료일 (99991231 → null)</td></tr><tr><td class="t">submitted_at</td><td class="ty">TIMESTAMP</td><td>금융회사 제출일시</td></tr><tr><td class="t">is_active</td><td class="ty">BOOLEAN</td><td>오늘 원문에 있으면 true (판매 중)</td></tr><tr><td class="t">first_seen_on</td><td class="ty">DATE</td><td>처음 수집된 날</td></tr><tr><td class="t">last_seen_on</td><td class="ty">DATE</td><td>마지막으로 수집된 날</td></tr><tr><td class="t">created_at</td><td class="ty">TIMESTAMPTZ</td><td>행 생성 시각</td></tr><tr><td class="t">updated_at</td><td class="ty">TIMESTAMPTZ</td><td>마지막 갱신 시각</td></tr></table></div></div></div>
+  <div class="foot"><span>db/migration/V1~V3 기준 · UK = UPSERT·중복 방지 키</span><span class="pg"></span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Column Dictionary</div>
+  <h2>컬럼 사전 — 예금·적금·대출 옵션 · 이력</h2>
+  <div class="cols c2" style="align-items:start"><div><div class="dict"><h3><span class="tag norm">product_option</span> <span class="muted" style="font-size:12px;font-weight:400">상품의 금리 조건 — 기간·금리유형·상환방식 조합 1개 = 1행</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>옵션 id</td></tr><tr><td class="t">product_id</td><td class="ty">BIGINT FK</td><td>부모 product · UK</td></tr><tr><td class="t">option_key</td><td class="ty">VARCHAR(32)</td><td>조건 조합 키 (예 12|S, 12|S|F, A|D|F) · UK</td></tr><tr><td class="t">save_term</td><td class="ty">SMALLINT</td><td>저축 기간(개월) — 예·적금</td></tr><tr><td class="t">rate_type</td><td class="ty">CHAR(1)</td><td>S 단리 · M 복리 — 예·적금</td></tr><tr><td class="t">reserve_type</td><td class="ty">CHAR(1)</td><td>S 정액적립 · F 자유적립 — 적금</td></tr><tr><td class="t">base_rate</td><td class="ty">NUMERIC(5,2)</td><td>기본 금리(%) — 예·적금</td></tr><tr><td class="t">max_rate</td><td class="ty">NUMERIC(5,2)</td><td>최고 우대 금리(%) — 예·적금</td></tr><tr><td class="t">mortgage_type</td><td class="ty">CHAR(1)</td><td>담보 A 아파트 · E 아파트외 — 주담대</td></tr><tr><td class="t">repay_type</td><td class="ty">CHAR(1)</td><td>D 분할상환 · S 만기일시 — 대출</td></tr><tr><td class="t">lend_rate_type</td><td class="ty">CHAR(1)</td><td>F 고정 · C 변동 — 대출</td></tr><tr><td class="t">rate_min</td><td class="ty">NUMERIC(5,2)</td><td>최저 금리(%) — 대출</td></tr><tr><td class="t">rate_max</td><td class="ty">NUMERIC(5,2)</td><td>최고 금리(%) — 대출</td></tr><tr><td class="t">rate_avg</td><td class="ty">NUMERIC(5,2)</td><td>전월 평균 금리(%) — 대출, 변동 감지 제외</td></tr><tr><td class="t">is_active</td><td class="ty">BOOLEAN</td><td>오늘 원문에 있으면 true</td></tr><tr><td class="t">last_seen_on</td><td class="ty">DATE</td><td>마지막으로 수집된 날</td></tr><tr><td class="t">created_at / updated_at</td><td class="ty">TIMESTAMPTZ</td><td>생성 · 갱신 시각</td></tr></table></div></div><div><div class="dict"><h3><span class="tag diff">rate_history</span> <span class="muted" style="font-size:12px;font-weight:400">예금·적금·대출 옵션 금리 변동 이력 — 바뀐 필드 1개 = 1행</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>이력 id</td></tr><tr><td class="t">product_option_id</td><td class="ty">BIGINT FK</td><td>바뀐 옵션 · UK</td></tr><tr><td class="t">changed_on</td><td class="ty">DATE</td><td>변동을 감지한 수집일 · UK</td></tr><tr><td class="t">field</td><td class="ty">VARCHAR(16)</td><td>base_rate · max_rate · rate_min · rate_max · UK</td></tr><tr><td class="t">old_value</td><td class="ty">NUMERIC(5,2)</td><td>이전 값 (신규 옵션이면 null)</td></tr><tr><td class="t">new_value</td><td class="ty">NUMERIC(5,2)</td><td>새 값 (옵션 소멸이면 null)</td></tr><tr><td class="t">created_at</td><td class="ty">TIMESTAMPTZ</td><td>행 생성 시각</td></tr></table></div></div></div>
+  <div class="foot"><span>db/migration/V1~V3 기준 · UK = UPSERT·중복 방지 키</span><span class="pg"></span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Column Dictionary</div>
+  <h2>컬럼 사전 — 신용대출</h2>
+  <div class="cols c2" style="align-items:start"><div><div class="dict"><h3><span class="tag norm">credit_loan_product</span> <span class="muted" style="font-size:12px;font-weight:400">신용대출 상품의 현재 상태</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>상품 id</td></tr><tr><td class="t">inst_code / product_code</td><td class="ty">VARCHAR</td><td>금융회사 코드 · 상품 코드 · UK</td></tr><tr><td class="t">credit_product_type</td><td class="ty">CHAR(1)</td><td>1 일반신용 · 2 마이너스한도 · 3 카드론 · UK</td></tr><tr><td class="t">fin_grp_no</td><td class="ty">VARCHAR(6)</td><td>수집한 권역</td></tr><tr><td class="t">inst_name / product_name</td><td class="ty">VARCHAR</td><td>금융회사명 · 상품명</td></tr><tr><td class="t">join_way</td><td class="ty">VARCHAR(100)</td><td>가입 방법</td></tr><tr><td class="t">cb_name</td><td class="ty">VARCHAR(16)</td><td>신용평가사 KCB · NICE</td></tr><tr><td class="t">disclosure_month</td><td class="ty">CHAR(6)</td><td>공시 제출월</td></tr><tr><td class="t">disclosure_start/end_date</td><td class="ty">DATE</td><td>공시 기간 (99991231 → null)</td></tr><tr><td class="t">submitted_at</td><td class="ty">TIMESTAMP</td><td>금융회사 제출일시</td></tr><tr><td class="t">is_active</td><td class="ty">BOOLEAN</td><td>판매 중 여부</td></tr><tr><td class="t">first_seen_on / last_seen_on</td><td class="ty">DATE</td><td>처음 · 마지막 수집일</td></tr><tr><td class="t">created_at / updated_at</td><td class="ty">TIMESTAMPTZ</td><td>생성 · 갱신 시각</td></tr></table></div></div><div><div class="dict"><h3><span class="tag norm">credit_loan_option</span> <span class="muted" style="font-size:12px;font-weight:400">신용대출 금리 종류별 신용점수 구간 금리</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>옵션 id</td></tr><tr><td class="t">credit_loan_product_id</td><td class="ty">BIGINT FK</td><td>부모 상품 · UK</td></tr><tr><td class="t">lend_rate_type</td><td class="ty">CHAR(1)</td><td>A 대출금리 · B 기준금리 · C 가산금리 · D 가감조정 · UK</td></tr><tr><td class="t">rate_grade_1 … 13</td><td class="ty">NUMERIC(5,2)</td><td>신용점수 구간별 금리 (1·4·5·6·10·11·12·13 구간)</td></tr><tr><td class="t">rate_avg</td><td class="ty">NUMERIC(5,2)</td><td>평균 금리</td></tr><tr><td class="t">is_active / last_seen_on</td><td class="ty">BOOLEAN/DATE</td><td>판매 중 여부 · 마지막 수집일</td></tr><tr><td class="t">created_at / updated_at</td><td class="ty">TIMESTAMPTZ</td><td>생성 · 갱신 시각</td></tr></table></div><div class="dict"><h3><span class="tag diff">credit_rate_history</span> <span class="muted" style="font-size:12px;font-weight:400">신용대출 금리 변동 이력</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>이력 id</td></tr><tr><td class="t">credit_loan_option_id</td><td class="ty">BIGINT FK</td><td>바뀐 옵션 · UK</td></tr><tr><td class="t">changed_on</td><td class="ty">DATE</td><td>감지한 수집일 · UK</td></tr><tr><td class="t">field</td><td class="ty">VARCHAR(16)</td><td>rate_grade_1 … 13 · rate_avg · UK</td></tr><tr><td class="t">old_value / new_value</td><td class="ty">NUMERIC(5,2)</td><td>전 · 후 값 (생김·사라짐은 null)</td></tr><tr><td class="t">created_at</td><td class="ty">TIMESTAMPTZ</td><td>행 생성 시각</td></tr></table></div></div></div>
+  <div class="foot"><span>db/migration/V1~V3 기준 · UK = UPSERT·중복 방지 키</span><span class="pg"></span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Column Dictionary</div>
+  <h2>컬럼 사전 — 이벤트 · 금융회사</h2>
+  <div class="cols c2" style="align-items:start"><div><div class="dict"><h3><span class="tag diff">change_event</span> <span class="muted" style="font-size:12px;font-weight:400">알림 대상 사건 — 상품 계열·신용 계열 중 하나만 가리킴</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>이벤트 id</td></tr><tr><td class="t">product_id</td><td class="ty">BIGINT FK</td><td>예금·적금·대출 상품 (신용이면 null)</td></tr><tr><td class="t">product_option_id</td><td class="ty">BIGINT FK</td><td>해당 옵션 (상품 단위 사건이면 null)</td></tr><tr><td class="t">credit_loan_product_id</td><td class="ty">BIGINT FK</td><td>신용대출 상품 (상품 계열이면 null)</td></tr><tr><td class="t">credit_loan_option_id</td><td class="ty">BIGINT FK</td><td>신용대출 옵션</td></tr><tr><td class="t">event_type</td><td class="ty">VARCHAR(16)</td><td>NEW · RATE_UP · RATE_DOWN · CLOSED · OPTION_REMOVED</td></tr><tr><td class="t">occurred_on</td><td class="ty">DATE</td><td>감지한 수집일</td></tr><tr><td class="t">payload</td><td class="ty">JSONB</td><td>RATE_UP/DOWN 이면 바뀐 필드와 전후 값</td></tr><tr><td class="t">consumed_at</td><td class="ty">TIMESTAMPTZ</td><td>알림 처리 완료 시각 (null = 미처리)</td></tr><tr><td class="t">created_at</td><td class="ty">TIMESTAMPTZ</td><td>행 생성 시각</td></tr></table></div></div><div><div class="dict"><h3><span class="tag norm">company</span> <span class="muted" style="font-size:12px;font-weight:400">금융회사 — companySearch 회사 1곳 = 1행</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>회사 id</td></tr><tr><td class="t">fin_co_no</td><td class="ty">VARCHAR(7)</td><td>금융회사 코드 · UK (= product.inst_code)</td></tr><tr><td class="t">fin_grp_no</td><td class="ty">VARCHAR(6)</td><td>권역</td></tr><tr><td class="t">company_name</td><td class="ty">VARCHAR(100)</td><td>회사명 (kor_co_nm)</td></tr><tr><td class="t">homepage_url / call_tel</td><td class="ty">VARCHAR</td><td>홈페이지 · 콜센터 번호</td></tr><tr><td class="t">disclosure_contact</td><td class="ty">TEXT</td><td>공시 담당 부서·연락처</td></tr><tr><td class="t">disclosure_month</td><td class="ty">CHAR(6)</td><td>공시 제출월</td></tr><tr><td class="t">is_active</td><td class="ty">BOOLEAN</td><td>오늘 원문에 있으면 true</td></tr><tr><td class="t">first_seen_on / last_seen_on</td><td class="ty">DATE</td><td>처음 · 마지막 수집일</td></tr><tr><td class="t">created_at / updated_at</td><td class="ty">TIMESTAMPTZ</td><td>생성 · 갱신 시각</td></tr></table></div><div class="dict"><h3><span class="tag norm">company_area</span> <span class="muted" style="font-size:12px;font-weight:400">회사별 시·도 영업점 유무</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>행 id</td></tr><tr><td class="t">company_id</td><td class="ty">BIGINT FK</td><td>회사 · UK</td></tr><tr><td class="t">area_code</td><td class="ty">VARCHAR(2)</td><td>시·도 코드 01 서울 … 17 제주 · UK</td></tr><tr><td class="t">area_name</td><td class="ty">VARCHAR(16)</td><td>시·도 이름</td></tr><tr><td class="t">has_branch</td><td class="ty">BOOLEAN</td><td>영업점 있음 (exis_yn = Y)</td></tr><tr><td class="t">last_seen_on</td><td class="ty">DATE</td><td>마지막 수집일</td></tr><tr><td class="t">created_at / updated_at</td><td class="ty">TIMESTAMPTZ</td><td>생성 · 갱신 시각</td></tr></table></div></div></div>
+  <div class="foot"><span>db/migration/V1~V3 기준 · UK = UPSERT·중복 방지 키</span><span class="pg"></span></div>
+</section>
+
+<section class="slide">
+  <div class="kicker">Column Dictionary</div>
+  <h2>컬럼 사전 — 알림 · 감사</h2>
+  <div class="cols c2" style="align-items:start"><div><div class="dict"><h3><span class="tag meta">alert_subscription</span> <span class="muted" style="font-size:12px;font-weight:400">금리 알림 구독 조건 (6주차 사용 예정)</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>구독 id</td></tr><tr><td class="t">email</td><td class="ty">VARCHAR(255)</td><td>받을 주소</td></tr><tr><td class="t">product_type</td><td class="ty">VARCHAR(8)</td><td>상품군 (null = 전체)</td></tr><tr><td class="t">save_term / min_rate</td><td class="ty">SMALLINT/NUMERIC</td><td>기간 조건 · 이 금리 이상만</td></tr><tr><td class="t">inst_code</td><td class="ty">VARCHAR(7)</td><td>특정 금융회사만</td></tr><tr><td class="t">event_types</td><td class="ty">VARCHAR(64)</td><td>받을 이벤트 종류</td></tr><tr><td class="t">is_active</td><td class="ty">BOOLEAN</td><td>구독 유지 여부</td></tr><tr><td class="t">created_at</td><td class="ty">TIMESTAMPTZ</td><td>행 생성 시각</td></tr></table></div><div class="dict"><h3><span class="tag meta">alert_delivery</span> <span class="muted" style="font-size:12px;font-weight:400">구독 × 이벤트 발송 기록 (6주차 사용 예정)</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>발송 id</td></tr><tr><td class="t">subscription_id / change_event_id</td><td class="ty">BIGINT FK</td><td>구독 · 이벤트 · UK</td></tr><tr><td class="t">status</td><td class="ty">VARCHAR(16)</td><td>PENDING · SENT · FAILED</td></tr><tr><td class="t">attempt_count</td><td class="ty">SMALLINT</td><td>발송 시도 횟수</td></tr><tr><td class="t">sent_at</td><td class="ty">TIMESTAMPTZ</td><td>발송 성공 시각</td></tr><tr><td class="t">last_error</td><td class="ty">TEXT</td><td>마지막 실패 사유</td></tr><tr><td class="t">created_at</td><td class="ty">TIMESTAMPTZ</td><td>행 생성 시각</td></tr></table></div></div><div><div class="dict"><h3><span class="tag meta">audit_log</span> <span class="muted" style="font-size:12px;font-weight:400">수동 보정·재실행 기록</span></h3><table><tr><th style="width:36%">컬럼</th><th style="width:19%">타입</th><th>의미</th></tr><tr><td class="t">id</td><td class="ty">BIGINT PK</td><td>기록 id</td></tr><tr><td class="t">actor</td><td class="ty">VARCHAR(64)</td><td>누가</td></tr><tr><td class="t">target_table / target_id</td><td class="ty">VARCHAR/BIGINT</td><td>어느 테이블의 어느 행</td></tr><tr><td class="t">action</td><td class="ty">VARCHAR(16)</td><td>UPDATE · RERUN</td></tr><tr><td class="t">before / after</td><td class="ty">JSONB</td><td>변경 전 · 후 값</td></tr><tr><td class="t">created_at</td><td class="ty">TIMESTAMPTZ</td><td>행 생성 시각</td></tr></table></div></div></div>
+  <div class="foot"><span>db/migration/V1~V3 기준 · UK = UPSERT·중복 방지 키</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -250,7 +295,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
       </ul>
     </div>
   </div>
-  <div class="foot"><span>collect/fetch · collect/step/FetchStepConfig</span><span>5</span></div>
+  <div class="foot"><span>collect/fetch · collect/step/FetchStepConfig</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -301,7 +346,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
         </ul></div>
     </div>
   </div>
-  <div class="foot"><span>예시 값은 형식 설명용 · survey/raw 에 실제 원문 픽스처</span><span>6</span></div>
+  <div class="foot"><span>예시 값은 형식 설명용 · survey/raw 에 실제 원문 픽스처</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -339,7 +384,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
         </ul></div>
     </div>
   </div>
-  <div class="foot"><span>collect/normalize · parse · store</span><span>7</span></div>
+  <div class="foot"><span>collect/normalize · parse · store</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -383,7 +428,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
       </div>
     </div>
   </div>
-  <div class="foot"><span>collect/normalize/parse/ProductBaseNormalizer</span><span>8</span></div>
+  <div class="foot"><span>collect/normalize/parse/ProductBaseNormalizer</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -419,7 +464,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
   <div class="card norm" style="flex:0 0 auto;margin-top:var(--gap)">
     <p style="margin:0">공통: 옵션의 <code>fin_co_no + fin_prdt_cd</code> 로 부모 상품 id 를 찾아 <code>product_id</code> 에 넣는다 → <code>ON CONFLICT (product_id, option_key) DO UPDATE</code>, 오늘 없던 옵션은 is_active=false. 옵션은 상품 하나에 여러 개(기간·금리유형·상환방식별)</p>
   </div>
-  <div class="foot"><span>collect/normalize/parse/DepositNormalizer · LoanNormalizer</span><span>9</span></div>
+  <div class="foot"><span>collect/normalize/parse/DepositNormalizer · LoanNormalizer</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -461,7 +506,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
       <p class="note">저장: CompanyUpsertService.upsertCompanies / upsertAreas / deactivateMissing (한 트랜잭션)</p>
     </div>
   </div>
-  <div class="foot"><span>collect/normalize/parse/CreditNormalizer · CompanyNormalizer</span><span>10</span></div>
+  <div class="foot"><span>collect/normalize/parse/CreditNormalizer · CompanyNormalizer</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -498,7 +543,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
       <p class="note">두 쓰기 모두 UK 충돌 시 DO NOTHING → 같은 날 재실행해도 한 번만 기록</p>
     </div>
   </div>
-  <div class="foot"><span>collect/diff</span><span>11</span></div>
+  <div class="foot"><span>collect/diff</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -524,7 +569,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
         <li>실패(단계·사유·다음 재시도), 복구, 중단, 마감, 고아 정리</li>
       </ul></div>
   </div>
-  <div class="foot"><span>collect/job · collect/notify</span><span>12</span></div>
+  <div class="foot"><span>collect/job · collect/notify</span><span class="pg"></span></div>
 </section>
 
 <section class="slide">
@@ -543,7 +588,7 @@ svg text{font-family:"Malgun Gothic",sans-serif}
     <div class="card norm"><p style="margin:0"><b>상태와 이력 분리</b> — product 계열은 오늘 상태, 변화는 history·event 에만</p></div>
     <div class="card diff"><p style="margin:0"><b>거짓 알림보다 멈춤</b> — 의심스러우면 실패시키고 사람에게 넘긴다</p></div>
   </div>
-  <div class="foot"><span>자세한 설계: docs/design/data-model.md · docs/adr</span><span>13</span></div>
+  <div class="foot"><span>자세한 설계: docs/design/data-model.md · docs/adr</span><span class="pg"></span></div>
 </section>
 
 </body>
