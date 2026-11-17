@@ -3,10 +3,11 @@ package com.gongsi.collect.job;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/** 실행 직후 기록으로 만드는 슬랙 문구 (실패·복구·마감) */
+/** 실행 직후 기록으로 만드는 슬랙 문구 (완료·복구·실패·중단·마감) - 제목 한 줄 + 항목 목록 */
 public final class CollectAlertMessages {
 
     private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
@@ -23,33 +24,58 @@ public final class CollectAlertMessages {
         CollectAttempt last = attempts.get(attempts.size() - 1);
         long failures = attempts.stream().filter(CollectAttempt::failed).count();
         if (last.completed()) {
-            String done = failures == 0 ? "[gongsi] %s 수집 완료".formatted(targetDate)
-                    : "[gongsi] %s 수집 복구 - 실패 %d회 뒤 완료".formatted(targetDate, failures);
-            return Optional.of(summary == null ? done : done + "\n" + summaryLines(summary));
+            String title = failures == 0
+                    ? title(":white_check_mark:", "수집 완료", targetDate, null)
+                    : title(":large_green_circle:", "수집 복구", targetDate, "실패 %d회 뒤 완료".formatted(failures));
+            return Optional.of(summary == null ? title : title + "\n" + summaryItems(summary));
         }
         if (!last.failed()) {
-            return Optional.empty();
+            return Optional.of(title(":grey_question:", "수집 상태 확인 필요", targetDate, last.status().name()));
         }
-        String head = "[gongsi] %s 수집 실패 %d회째 (%s)\n사유: %s".formatted(
-                targetDate, failures, nvl(last.failedStep(), "단계 모름"), nvl(last.reason(), "없음"));
+        String count = "%d회째".formatted(failures);
+        String cause = item("단계", nvl(last.failedStep(), "모름")) + "\n" + item("사유", nvl(last.reason(), "없음"));
         if (!last.retryable()) {
-            return Optional.of(head + "\n재시도 안 함 - 원문 확인 필요");
+            return Optional.of(title(":octagonal_sign:", "수집 중단", targetDate, count) + "\n" + cause
+                    + "\n" + item("조치", "재시도 안 함 - 원문 확인 필요"));
         }
-        return Optional.of(nextRun != null
-                ? head + "\n다음 재시도 " + nextRun.format(HHMM)
-                : head + "\n오늘 자동 재시도 끝 - 수동 실행 필요");
+        if (nextRun == null) {
+            return Optional.of(title(":red_circle:", "수집 실패", targetDate, count) + "\n" + cause
+                    + "\n" + item("조치", "오늘 자동 재시도 끝 - 수동 실행 필요"));
+        }
+        return Optional.of(title(":warning:", "수집 실패", targetDate, count) + "\n" + cause
+                + "\n" + item("다음", nextRun.format(HHMM) + " 재시도"));
     }
 
-    // 원문·상품 / 금리 변동·오류 두 줄
-    static String summaryLines(CollectSummary s) {
-        return "원문 %d페이지 · %d권역 / 판매 중 상품 %,d (신규 %d, 종료 %d)\n금리 변동 인상 %d · 인하 %d / 정규화 오류 %d"
-                .formatted(s.pages(), s.groups(), s.activeProducts(), s.newProducts(), s.closedProducts(),
-                        s.rateUp(), s.rateDown(), s.normalizeErrors());
+    // 원문·상품·금리·오류 네 항목
+    static String summaryItems(CollectSummary s) {
+        return String.join("\n",
+                item("원문", "%d페이지 · %d권역".formatted(s.pages(), s.groups())),
+                item("상품", "판매 중 %,d (신규 %d · 종료 %d)".formatted(s.activeProducts(), s.newProducts(), s.closedProducts())),
+                item("금리", "인상 %d · 인하 %d".formatted(s.rateUp(), s.rateDown())),
+                item("오류", "정규화 %d".formatted(s.normalizeErrors())));
     }
 
     // Job 을 띄우지도 못했을 때
     public static String launchFailed(LocalDate targetDate, Exception e) {
-        return "[gongsi] %s 수집 실행 못 함\n사유: %s".formatted(targetDate, e.getMessage());
+        return title(":x:", "수집 실행 못 함", targetDate, null) + "\n" + item("사유", nvl(e.getMessage(), "없음"));
+    }
+
+    // 예) :warning: *gongsi 수집 실패* · 2026-11-17 (1회째)
+    private static String title(String emoji, String what, LocalDate targetDate, String note) {
+        List<String> parts = new ArrayList<>(List.of(emoji, "*gongsi " + what + "*", "·", targetDate.toString()));
+        if (note != null) {
+            parts.add("(" + note + ")");
+        }
+        return String.join(" ", parts);
+    }
+
+    // 예) • *사유*  timeout [슬랙 특수문자 이스케이프]
+    private static String item(String label, String value) {
+        return "• *" + label + "*  " + escape(value);
+    }
+
+    private static String escape(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private static String nvl(String value, String fallback) {
