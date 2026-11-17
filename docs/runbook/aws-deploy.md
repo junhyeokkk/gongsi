@@ -173,6 +173,7 @@ psql -v d=2026-10-30 -f fingerprint.sql                              # 로컬과
 
 - 완료됐으면 건너뛰고, 실패하면 마지막 종료 뒤 10분 → 30분 → 60분(이후 60분마다) 기다려 실패한 Step 부터 다시 돈다
 - diffStep 이 상품 급변(원문 누락 의심)으로 멈추면 종료 코드 `FAILED_NO_RETRY` 로 남고 재시도하지 않는다
+- 수집 도중 앱이 재기동(배포·장애)되면 그 실행은 `STARTED` 로 남는다. 앱이 뜰 때 이전 JVM 이 남긴 running 실행을 찾아 Job·미완료 Step 을 `FAILED` 로 닫고 슬랙 "중단된 수집 정리" 를 보낸다. 그 뒤로는 일반 실패와 같아서 백오프 뒤 끊긴 Step 부터 다시 돈다 — DB 를 손으로 고칠 일은 없다
 - 슬랙 알림: 매일 완료 요약(원문·상품·금리 변동·정규화 오류 — 안 오면 서버를 의심), 실패(단계·사유·다음 재시도 시각), 실패 뒤 복구, 급변 "원문 확인 필요", 오늘 자동 재시도 끝 "수동 실행 필요"
 
 ```bash
@@ -183,7 +184,7 @@ psql -c "SELECT e.job_execution_id, e.status, s.step_name, s.exit_code, e.end_ti
          WHERE s.status <> 'COMPLETED' ORDER BY 1 DESC LIMIT 10"
 ```
 
-"수동 실행 필요" 알림을 받았거나 급변 원문을 확인한 뒤 서버에서 수동 실행:
+"수동 실행 필요" 알림을 받았거나 급변 원문을 확인한 뒤 서버에서 수동 실행 (서비스를 멈출 때 끊긴 실행도 수동 실행 JVM 이 먼저 정리하고 이어 돈다):
 
 ```bash
 sudo systemctl stop gongsi

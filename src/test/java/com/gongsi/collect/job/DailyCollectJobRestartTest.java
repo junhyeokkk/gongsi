@@ -9,6 +9,7 @@ import com.gongsi.common.ProductType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParameters;
@@ -16,6 +17,8 @@ import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.repository.JobExecutionAlreadyRunningException;
+import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -29,6 +32,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -36,12 +40,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-// diffStep 에서 실패한 dailyCollectJob 을 같은 targetDate 로 다시 띄우면 diffStep 부터 이어 도는지 검증. Docker 가 있는 CI 에서만 실행
+// 실패·고아 실행을 같은 targetDate 로 다시 띄우면 멈춘 Step 부터 이어 도는지 검증. Docker 가 있는 CI 에서만 실행
 @SpringBootTest
 @Testcontainers
 @EnabledIfEnvironmentVariable(named = "CI", matches = "true")
@@ -49,6 +54,7 @@ class DailyCollectJobRestartTest {
 
     private static final LocalDate DAY1 = LocalDate.of(2026, 10, 30);
     private static final LocalDate DAY2 = DAY1.plusDays(1);
+    private static final LocalDate ORPHAN_DAY = LocalDate.of(2026, 11, 5);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Path RAW_DIR = Path.of("survey/raw");
     private static final Map<ProductType, String> FIXTURES = Map.of(
@@ -83,6 +89,12 @@ class DailyCollectJobRestartTest {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @Autowired
+    JobRepository jobRepository;
+
+    @Autowired
+    OrphanExecutionCleaner cleaner;
 
     @Test
     void diffStep_실패_후_같은_날짜로_재실행하면_diffStep_부터_이어_돈다() throws Exception {
@@ -120,6 +132,49 @@ class DailyCollectJobRestartTest {
         assertThat(stepRuns(first)).containsExactlyInAnyOrderEntriesOf(Map.of(
                 "fetchStep", 1L, "normalizeStep", 1L, "diffStep", 2L, "notifyStep", 1L));
         verify(fetchService, times(1)).fetchAll(DAY2);
+    }
+
+    @Test
+    void 재기동으로_STARTED_에_남은_실행을_정리하면_멈춘_Step_부터_이어_돈다() throws Exception {
+        // 1. notifyStep 도중 앱이 죽어 STARTED 로 남은 실행
+        JobParameters params = DailyCollectJobConfig.params(ORPHAN_DAY);
+        JobExecution orphan = jobRepository.createJobExecution(DailyCollectJobConfig.JOB_NAME, params);
+        orphan.setStatus(BatchStatus.STARTED);
+        orphan.setStartTime(LocalDateTime.now());
+        jobRepository.update(orphan);
+        for (String name : List.of("fetchStep", "normalizeStep", "diffStep")) {
+            addStep(orphan, name, BatchStatus.COMPLETED);
+        }
+        addStep(orphan, "notifyStep", BatchStatus.STARTED);
+        assertThatThrownBy(() -> jobLauncher.run(dailyCollectJob, params))
+                .isInstanceOf(JobExecutionAlreadyRunningException.class);
+
+        // 2. 기동 시 정리 - Job·notifyStep 이 FAILED 로 닫힌다
+        assertThat(cleaner.cleanup(LocalDateTime.now().plusSeconds(1)))
+                .extracting(JobExecution::getId).containsExactly(orphan.getId());
+        JobExecution cleaned = jobExplorer.getJobExecution(orphan.getId());
+        assertThat(cleaned.getStatus()).isEqualTo(BatchStatus.FAILED);
+        assertThat(cleaned.getEndTime()).isNotNull();
+        assertThat(statuses(cleaned)).containsEntry("notifyStep", BatchStatus.FAILED)
+                .containsEntry("diffStep", BatchStatus.COMPLETED);
+
+        // 3. 같은 targetDate 재실행은 notifyStep 만 돌고 완료
+        JobExecution rerun = jobLauncher.run(dailyCollectJob, params);
+        assertThat(rerun.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        assertThat(rerun.getJobInstance().getInstanceId()).isEqualTo(orphan.getJobInstance().getInstanceId());
+        assertThat(statuses(rerun)).containsExactlyEntriesOf(Map.of("notifyStep", BatchStatus.COMPLETED));
+    }
+
+    private void addStep(JobExecution execution, String name, BatchStatus status) {
+        StepExecution step = execution.createStepExecution(name);
+        step.setStartTime(LocalDateTime.now());
+        jobRepository.add(step);
+        step.setStatus(status);
+        if (status == BatchStatus.COMPLETED) {
+            step.setExitStatus(ExitStatus.COMPLETED);
+            step.setEndTime(LocalDateTime.now());
+        }
+        jobRepository.update(step);
     }
 
     private static Map<String, BatchStatus> statuses(JobExecution execution) {
