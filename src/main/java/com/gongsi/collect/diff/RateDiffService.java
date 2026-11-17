@@ -108,7 +108,7 @@ public class RateDiffService {
         long closed = productEvents(result, ChangeEventType.CLOSED);
         long added = productEvents(result, ChangeEventType.NEW);
         if (exceeds(closed, prevProducts) || exceeds(added, todayProducts)) {
-            throw new GongsiException("상품 급변 - 원문 누락 의심 type=%s targetDate=%s closed=%d/%d new=%d/%d"
+            throw new MassChangeException("상품 급변 - 원문 누락 의심 type=%s targetDate=%s closed=%d/%d new=%d/%d"
                     .formatted(type, targetDate, closed, prevProducts, added, todayProducts));
         }
     }

@@ -27,6 +27,7 @@ public class DiffStepConfig {
                     rateDiffService.detectChanges(LocalDate.parse(param.toString()));
                     return RepeatStatus.FINISHED;
                 }, new ResourcelessTransactionManager())
+                .listener(new NoRetryExitListener())
                 .build();
     }
 }
