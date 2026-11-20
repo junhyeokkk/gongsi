@@ -18,4 +18,12 @@
 | [0003](0003-diff-baseline.md) | 변경 감지 비교 기준 · 결측일 처리 — 직전 수집일 원문 재정규화 | 준혁 | 제안 |
 | 0004 | 알림 발송 실패 재시도 정책 | 친구 | 제안 |
 | 0005 | 검색 성능 — 인덱스 vs 캐시 | 친구 | 제안 |
-| 0006 | 운영 호스팅 — EC2 + RDS, 크레딧 관찰 | 준혁 | 제안 |
+| [0006](0006-ec2-rds-hosting.md) | 운영 호스팅 — EC2 + RDS, 크레딧 관찰 | 준혁 | 제안 |
+| [0007](0007-normalize-error-isolation.md) | 정규화 오류 격리 — 레코드 단위로 normalize_error 에 남기고 계속 | 준혁 | 제안 |
+| [0008](0008-company-raw-snapshot.md) | 금융회사 원문 — raw_snapshot 에 product_type=COMPANY 로 함께 보관 | 준혁 | 제안 |
+| [0009](0009-fin-groups.md) | 수집 권역 — 은행·저축은행·여신전문·보험, 금융투자 제외 | 준혁 | 제안 |
+| [0010](0010-credit-loan-tables.md) | 신용대출 — credit_loan_* 별도 테이블, change_event XOR | 준혁 | 제안 |
+| [0011](0011-collect-retry-backoff.md) | 수집 실패 재시도 — 배치 메타 기반 판단, 10/30/60분 백오프 | 준혁 | 제안 |
+| [0012](0012-mass-change-no-retry.md) | 급변 차단 — 재시도하지 않고 FAILED_NO_RETRY 로 멈춤 | 준혁 | 제안 |
+| [0013](0013-slack-ops-alert.md) | 운영 알림 — 슬랙 Incoming Webhook, 발송 실패는 무시 | 준혁 | 제안 |
+| [0014](0014-orphan-execution-cleanup.md) | 고아 실행 정리 — 기동 시 이전 JVM 의 running 실행을 FAILED 로 닫음 | 준혁 | 제안 |
